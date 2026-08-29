@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>EliteHub Connect</title>
+    <script src="/static/theme.js"></script>
+    <link rel="stylesheet" href="/static/elitehub.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#auth-card">Pular para o formulário</a>
+    <div class="app-frame">
+      <section id="auth-view" class="auth-shell" aria-labelledby="auth-page-title">
+        <header class="auth-panel">
+          <div class="auth-panel__shape auth-panel__shape--one" aria-hidden="true"></div>
+          <div class="auth-panel__shape auth-panel__shape--two" aria-hidden="true"></div>
+          <div class="auth-panel__content">
+            <div class="auth-panel__topline">
+              <span class="brand" aria-label="EliteHub Connect">EliteHub <span>Connect</span></span>
+              <button class="icon-button icon-button--on-panel" type="button" data-theme-toggle aria-label="Alternar tema" title="Alternar tema"><span aria-hidden="true" data-theme-icon>◐</span></button>
+            </div>
+            <div class="auth-panel__copy">
+              <p class="eyebrow eyebrow--on-panel">Marketplace interno</p>
+              <h1 id="auth-page-title">Entre na EliteHub</h1>
+              <p id="auth-panel-subtitle">Acesse sua conta para continuar.</p>
+            </div>
+          </div>
+        </header>
+
+        <main id="auth-card" class="auth-card" tabindex="-1">
+          <div id="auth-status" class="status" role="status" aria-live="polite" hidden></div>
+          <div class="auth-card__heading"><h2 id="auth-title">Entre na sua conta</h2><p id="auth-subtitle">Use seu e-mail e senha para continuar.</p></div>
+          <div id="google-section" class="google-section">
+            <button id="google-login" class="button button--google" type="button" aria-label="Continuar com Google">
+              <svg class="google-mark" viewBox="0 0 18 18" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M17.64 9.205c0-.638-.057-1.252-.164-1.841H9v3.483h4.844a4.14 4.14 0 0 1-1.797 2.717v2.258h2.909c1.703-1.568 2.684-3.878 2.684-6.617Z"/><path fill="#4285F4" d="M9 18c2.43 0 4.467-.806 5.956-2.178l-2.909-2.258c-.806.54-1.836.859-3.047.859-2.344 0-4.328-1.583-5.037-3.709H.956v2.331A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.963 10.714A5.41 5.41 0 0 1 3.681 9c0-.594.102-1.172.282-1.714V4.955H.956A9 9 0 0 0 0 9c0 1.454.348 2.832.956 4.045l3.007-2.331Z"/><path fill="#34A853" d="M9 3.578c1.322 0 2.51.455 3.445 1.348l2.584-2.584C13.463.88 11.426 0 9 0A9 9 0 0 0 .956 4.955l3.007 2.331C4.672 5.16 6.656 3.578 9 3.578Z"/></svg>
+              <span>Continuar com Google</span>
+            </button>
+            <div class="auth-divider" aria-hidden="true"><span>ou continue com e-mail</span></div>
+          </div>
+
+          <form id="login-form" class="form-stack" novalidate>
+            <div class="field-group"><label for="login-email">E-mail</label><input id="login-email" name="email" type="email" placeholder="voce@exemplo.com" autocomplete="email" inputmode="email" aria-describedby="login-email-error" required /><p class="field-error" id="login-email-error" aria-live="polite"></p></div>
+            <div class="field-group"><label for="login-password">Senha</label><div class="password-input"><input id="login-password" name="password" type="password" placeholder="Digite sua senha" autocomplete="current-password" aria-describedby="login-password-error" required /><button class="input-action" type="button" data-password-toggle="login-password" aria-label="Mostrar senha" title="Mostrar senha">Mostrar</button></div><p class="field-error" id="login-password-error" aria-live="polite"></p></div>
+            <div class="form-row form-row--between"><label class="checkbox-row" for="remember-me"><input id="remember-me" name="rememberMe" type="checkbox" /><span>Lembrar de mim</span></label><button class="text-button" type="button" data-auth-mode="recovery">Esqueci minha senha</button></div>
+            <button class="button button--primary" type="submit">Entrar</button>
+          </form>
+
+          <form id="register-form" class="form-stack" novalidate hidden>
+            <div class="name-fields"><div class="field-group"><label for="register-first-name">Nome</label><input id="register-first-name" name="firstName" type="text" placeholder="Seu nome" autocomplete="given-name" aria-describedby="register-first-name-error" required /><p class="field-error" id="register-first-name-error" aria-live="polite"></p></div><div class="field-group"><label for="register-last-name">Sobrenome</label><input id="register-last-name" name="lastName" type="text" placeholder="Seu sobrenome" autocomplete="family-name" aria-describedby="register-last-name-error" required /><p class="field-error" id="register-last-name-error" aria-live="polite"></p></div></div>
+            <div class="field-group"><label for="register-email">E-mail</label><input id="register-email" name="email" type="email" placeholder="voce@exemplo.com" autocomplete="email" inputmode="email" aria-describedby="register-email-error" required /><p class="field-error" id="register-email-error" aria-live="polite"></p></div>
+            <div class="field-group"><label for="register-password">Senha</label><div class="password-input"><input id="register-password" name="password" type="password" placeholder="Digite sua senha" autocomplete="new-password" aria-describedby="password-requirements register-password-error" required /><button class="input-action" type="button" data-password-toggle="register-password" aria-label="Mostrar senha" title="Mostrar senha">Mostrar</button></div><p id="password-requirements" class="hint">Use ao menos 12 caracteres, com maiúscula, minúscula e número.</p><p class="field-error" id="register-password-error" aria-live="polite"></p></div>
+            <div class="field-group"><label for="register-password-confirmation">Confirme sua senha</label><div class="password-input"><input id="register-password-confirmation" name="passwordConfirmation" type="password" placeholder="Digite novamente sua senha" autocomplete="new-password" aria-describedby="register-password-confirmation-error" required /><button class="input-action" type="button" data-password-toggle="register-password-confirmation" aria-label="Mostrar senha" title="Mostrar senha">Mostrar</button></div><p class="field-error" id="register-password-confirmation-error" aria-live="polite"></p></div>
+            <button class="button button--primary" type="submit">Criar conta</button>
+            <p class="legal-copy">Ao criar a conta, você aceita os <a href="/static/legal.html#termos">Termos de Uso</a> e a <a href="/static/legal.html#privacidade">Política de Privacidade</a>.</p>
+          </form>
+
+          <form id="recovery-form" class="form-stack" novalidate hidden><div class="field-group"><label for="recovery-email">E-mail</label><input id="recovery-email" name="email" type="email" placeholder="voce@exemplo.com" autocomplete="email" inputmode="email" aria-describedby="recovery-email-error" required /><p class="field-error" id="recovery-email-error" aria-live="polite"></p></div><button class="button button--primary" type="submit">Enviar instruções</button></form>
+          <form id="reset-form" class="form-stack" novalidate hidden><div class="field-group"><label for="reset-password">Senha</label><div class="password-input"><input id="reset-password" name="password" type="password" placeholder="Digite sua senha" autocomplete="new-password" aria-describedby="reset-password-error" required /><button class="input-action" type="button" data-password-toggle="reset-password" aria-label="Mostrar senha" title="Mostrar senha">Mostrar</button></div><p class="field-error" id="reset-password-error" aria-live="polite"></p></div><div class="field-group"><label for="reset-password-confirmation">Confirme sua senha</label><div class="password-input"><input id="reset-password-confirmation" name="passwordConfirmation" type="password" placeholder="Digite novamente sua senha" autocomplete="new-password" aria-describedby="reset-password-confirmation-error" required /><button class="input-action" type="button" data-password-toggle="reset-password-confirmation" aria-label="Mostrar senha" title="Mostrar senha">Mostrar</button></div><p class="field-error" id="reset-password-confirmation-error" aria-live="polite"></p></div><button class="button button--primary" type="submit">Salvar nova senha</button></form>
+
+          <div class="auth-switch" id="auth-switch-area"><span id="auth-switch-prompt">Ainda não tenho uma conta</span><button id="auth-switch" class="text-button" type="button" data-auth-mode="register">Criar conta</button></div>
+          <p class="card-footer">Ambiente interno da EliteHub Connect.</p>
+        </main>
+      </section>
+
+      <section id="marketplace-view" hidden>
+        <header class="market-header"><a class="brand" href="#inicio" aria-label="EliteHub Connect, início">EliteHub <span>Connect</span></a><button id="mobile-menu-button" class="icon-button mobile-only" type="button" aria-controls="market-nav" aria-expanded="false" aria-label="Abrir menu" title="Abrir menu">☰</button><form id="search-form" class="search" role="search"><label class="sr-only" for="product-search">Buscar produtos</label><input id="product-search" type="search" placeholder="Buscar produtos, categorias e serviços" autocomplete="off" /><button class="button button--primary" type="submit">Buscar</button></form><div class="header-actions"><button class="icon-button" type="button" data-theme-toggle aria-label="Alternar tema" title="Alternar tema"><span aria-hidden="true" data-theme-icon>◐</span></button><button class="icon-button" type="button" aria-label="Carrinho" title="Carrinho" disabled>🛒</button><button id="account-button" class="user-button" type="button" aria-haspopup="menu" aria-expanded="false">Conta</button></div></header>
+        <nav id="market-nav" class="market-nav" aria-label="Navegação do marketplace"><a href="#inicio">Início</a><a href="#categorias">Categorias</a><button id="seller-area-button" class="nav-button" type="button" hidden>Área do vendedor</button><button id="professional-area-button" class="nav-button" type="button" hidden>Área profissional</button><button id="logout-button" class="nav-button nav-button--danger" type="button">Sair</button></nav>
+        <main id="main-content" class="market-main" tabindex="-1"><div id="market-status" class="status" role="status" aria-live="polite" hidden></div><section class="market-toolbar" aria-labelledby="catalog-title"><div><p class="eyebrow">Marketplace</p><h1 id="catalog-title">Produtos disponíveis</h1></div><button id="refresh-products" class="button button--secondary" type="button">Atualizar</button></section><section id="category-list" class="category-list" aria-label="Categorias"></section><section id="product-list" class="product-grid" aria-live="polite" aria-busy="true"></section></main>
+      </section>
+    </div>
+    <dialog id="product-dialog" class="product-dialog" aria-labelledby="product-dialog-title"><button id="close-product-dialog" class="icon-button dialog-close" type="button" aria-label="Fechar detalhes do produto" title="Fechar">×</button><div id="product-detail" aria-live="polite"></div></dialog>
+    <template id="product-skeleton-template"><article class="product-card product-card--skeleton" aria-label="Carregando produto"><div class="skeleton-image"></div><div class="skeleton-line"></div><div class="skeleton-line skeleton-line--short"></div></article></template>
+    <script src="/static/elitehub.js" defer></script>
+  </body>
+</html>
