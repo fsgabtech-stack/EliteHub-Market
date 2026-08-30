@@ -1,0 +1,140 @@
+name: elitehub-connect
+
+x-aplicacao: &aplicacao
+  build:
+    context: .
+  environment:
+    APP_ORIGIN: http://localhost:${API_HOST_PORT:-8001}
+    API_RATE_LIMIT_MAX: ${API_RATE_LIMIT_MAX:-120}
+    API_RATE_LIMIT_WINDOW_MS: ${API_RATE_LIMIT_WINDOW_MS:-60000}
+    AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-20}
+    DATABASE_URL: postgresql://${POSTGRES_USER:-elitehub}:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}@postgres:5432/elitehub_connect
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:${API_HOST_PORT:-8001}/api/v1/auth/google/callback}
+    LOG_LEVEL: info
+    MARKETPLACE_COMMISSION_BPS: ${MARKETPLACE_COMMISSION_BPS:?Defina a comissão aprovada em pontos-base no .env}
+    METRICS_ENABLED: "true"
+    NODE_ENV: development
+    OUTBOX_POLL_INTERVAL_MS: "2000"
+    MERCADO_PAGO_ACCESS_TOKEN: ${MERCADO_PAGO_ACCESS_TOKEN:-}
+    MERCADO_PAGO_WEBHOOK_SECRET: ${MERCADO_PAGO_WEBHOOK_SECRET:-}
+    METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-elitehub-connect}
+    PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-disabled}
+    PAYMENT_SANDBOX: ${PAYMENT_SANDBOX:-true}
+    PORT: "8000"
+    REDIS_URL: redis://redis:6379
+    S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Defina MINIO_ROOT_USER no .env}
+    S3_BUCKET: elitehub-files
+    S3_ENDPOINT: http://minio:9000
+    S3_REGION: sa-east-1
+    S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Defina MINIO_ROOT_PASSWORD no .env}
+    SEARCH_INDEX: ${SEARCH_INDEX:-elitehub-products}
+    SEARCH_URL: ${SEARCH_URL:-}
+    SESSION_SECRET: ${SESSION_SECRET:?Defina SESSION_SECRET no .env}
+    SHIPPING_FIXED_CENTS: ${SHIPPING_FIXED_CENTS:?Defina a política de frete no .env}
+    SMTP_FROM: ${SMTP_FROM:-}
+    SMTP_URL: ${SMTP_URL:-}
+    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+    WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+  depends_on:
+    minio-init:
+      condition: service_completed_successfully
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  api:
+    <<: *aplicacao
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_HOST_PORT:-8001}:8000"
+
+  worker:
+    <<: *aplicacao
+    command: ["node", "--import", "./dist/observability/instrumentation.js", "dist/worker.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  migrate:
+    <<: *aplicacao
+    command: ["node", "dist/scripts/migrate.js"]
+    restart: "no"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: elitehub_connect
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+      POSTGRES_USER: ${POSTGRES_USER:-elitehub}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Defina MINIO_ROOT_PASSWORD no .env}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Defina MINIO_ROOT_USER no .env}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >-
+      /bin/sh -ec 'until mc alias set elitehub http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done; mc mb --ignore-existing elitehub/elitehub-files'
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Defina MINIO_ROOT_PASSWORD no .env}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Defina MINIO_ROOT_USER no .env}
+
+volumes:
+  minio_data:
+  postgres_data:
+  redis_data:

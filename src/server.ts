@@ -1,68 +1,25 @@
-import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { config } from "./config.js";
+import { closePool } from "./db/pool.js";
+import { closeRedis } from "./infrastructure/cache/redis.js";
+import { logger } from "./observability/logger.js";
+import { iniciarTracing, encerrarTracing } from "./observability/tracing.js";
 
-import cookieParser from "cookie-parser";
-import express from "express";
-import helmet from "helmet";
+iniciarTracing();
+const { criarAplicacao } = await import("./app.js");
+const app = criarAplicacao();
 
-import { config, hasPersistenceConfiguration, persistenceConfigurationMessage } from "./config.js";
-import { checkDatabase } from "./db/pool.js";
-import { errorHandler } from "./http/errors.js";
-import { registerAuthRoutes } from "./routes/auth.js";
-import { registerCatalogRoutes } from "./routes/catalog.js";
-
-const app = express();
-
-app.disable("x-powered-by");
-app.use((request, response, next) => {
-  const requestId = request.get("x-request-id") ?? randomUUID();
-  response.setHeader("x-request-id", requestId);
-  next();
+const server = app.listen(config.port, () => {
+  logger.info({ origemAplicacao: config.appOrigin, porta: config.port }, "API iniciada");
 });
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        baseUri: ["'self'"],
-        defaultSrc: ["'self'"],
-        imgSrc: ["'self'", "https:", "data:"],
-        objectSrc: ["'none'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'"],
-      },
-    },
-    crossOriginEmbedderPolicy: false,
-  }),
-);
-app.use(express.json({ limit: "64kb", type: "application/json" }));
-app.use(cookieParser());
-app.use("/static", express.static(join(process.cwd(), "static"), { fallthrough: false, index: false }));
 
-const api = express.Router();
-api.get("/health", async (_request, response) => {
-  const databaseReady = await checkDatabase();
-  response.status(databaseReady ? 200 : 503).json({
-    database: databaseReady ? "ready" : "unavailable",
-    persistenceConfigured: hasPersistenceConfiguration(),
-    status: databaseReady ? "ok" : "degraded",
+function encerrarServidor(sinal: string): void {
+  server.close(() => {
+    Promise.allSettled([encerrarTracing(), closePool(), closeRedis()])
+      .finally(() => process.exit(0));
   });
-});
-registerAuthRoutes(api);
-registerCatalogRoutes(api);
-app.use("/api/v1", api);
+  setTimeout(() => process.exit(1), 10_000).unref();
+  logger.info({ sinal }, "encerramento da API solicitado");
+}
 
-app.use((request, response) => {
-  if (request.accepts("html")) {
-    response.redirect(302, "/static/elitehub.html");
-    return;
-  }
-  response.status(404).json({ error: { code: "NOT_FOUND", message: "O recurso solicitado não foi encontrado." } });
-});
-app.use(errorHandler);
-
-app.listen(config.port, () => {
-  console.log(`EliteHub Connect listening on ${config.appOrigin}`);
-  if (!hasPersistenceConfiguration()) {
-    console.warn(`Persistence is unavailable: ${persistenceConfigurationMessage()}`);
-  }
-});
+process.once("SIGINT", () => encerrarServidor("SIGINT"));
+process.once("SIGTERM", () => encerrarServidor("SIGTERM"));

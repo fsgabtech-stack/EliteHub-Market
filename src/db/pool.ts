@@ -2,6 +2,7 @@ import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 import { config, hasPersistenceConfiguration } from "../config.js";
 import { unavailable } from "../http/errors.js";
+import { logger } from "../observability/logger.js";
 
 let pool: Pool | undefined;
 
@@ -19,7 +20,7 @@ function databasePool(): Pool {
       ssl: config.isProduction ? { rejectUnauthorized: true } : undefined,
     });
     pool.on("error", (error) => {
-      console.error("PostgreSQL pool error", { message: error.message });
+      logger.error({ erro: error.name }, "erro no pool PostgreSQL");
     });
   }
 
@@ -36,7 +37,7 @@ export async function query<T extends QueryResultRow>(
     if (error instanceof Error && error.name === "AppError") {
       throw error;
     }
-    console.error("PostgreSQL query failed", { message: error instanceof Error ? error.message : "Unknown error" });
+    logger.error({ erro: error instanceof Error ? error.name : "Erro desconhecido" }, "consulta PostgreSQL falhou");
     throw unavailable();
   }
 }
@@ -48,7 +49,7 @@ export async function transaction<T>(
   try {
     client = await databasePool().connect();
   } catch (error) {
-    console.error("PostgreSQL connection failed", { message: error instanceof Error ? error.message : "Unknown error" });
+    logger.error({ erro: error instanceof Error ? error.name : "Erro desconhecido" }, "conexão PostgreSQL falhou");
     throw unavailable();
   }
 

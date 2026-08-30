@@ -9,7 +9,7 @@ import { config } from "../../config.js";
 
 function key(): Buffer {
   if (!config.sessionSecret) {
-    throw new Error("SESSION_SECRET is required to protect server values.");
+    throw new Error("SESSION_SECRET é obrigatória para proteger valores do servidor.");
   }
   return createHash("sha256").update(config.sessionSecret).digest();
 }
@@ -24,7 +24,7 @@ export function sealServerValue(value: string): string {
 export function openServerValue(envelope: string): string {
   const input = Buffer.from(envelope, "base64url");
   if (input.length < 29) {
-    throw new Error("Invalid encrypted server value.");
+    throw new Error("Valor criptografado do servidor inválido.");
   }
   const decipher = createDecipheriv("aes-256-gcm", key(), input.subarray(0, 12));
   decipher.setAuthTag(input.subarray(12, 28));

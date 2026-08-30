@@ -16,11 +16,16 @@ import {
   currentSession,
   requireSession,
   revokeCurrentSession,
+  rotateCurrentSession,
 } from "../domain/auth/session.js";
+import { issueAccessToken } from "../domain/auth/access-token.js";
 import { sealServerValue } from "../domain/auth/secret-envelope.js";
 import { AppError, asyncRoute, invalidRequest } from "../http/errors.js";
+import { logger } from "../observability/logger.js";
 import {
   csrfCookieOptions,
+  accessTokenCookieOptions,
+  ACCESS_TOKEN_COOKIE,
   csrfProtection,
   newOpaqueToken,
   sessionCookieOptions,
@@ -52,6 +57,7 @@ const loginSchema = z.object({
 });
 
 const recoverySchema = z.object({ email: z.string().trim().toLowerCase().email().max(320) });
+const emailVerificationSchema = z.object({ token: z.string().min(40).max(200) });
 
 const passwordResetSchema = z
   .object({
@@ -70,7 +76,7 @@ const passwordResetSchema = z
 
 const authLimiter = rateLimit({
   handler: (_request, _response, next) => next(new AppError(429, "RATE_LIMITED")),
-  limit: 20,
+  limit: config.api.authRateLimitMax,
   standardHeaders: "draft-8",
   windowMs: 15 * 60 * 1000,
 });
@@ -92,11 +98,36 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   return parsed.data;
 }
 
+async function enqueueEmailVerification(client: import("pg").PoolClient, userId: string, recipientEmail: string): Promise<void> {
+  const rawToken = newOpaqueToken();
+  await client.query("UPDATE email_confirmation_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL", [userId]);
+  await client.query(
+    `INSERT INTO email_confirmation_tokens(user_id, token_hash, expires_at)
+     VALUES ($1, $2, now() + interval '24 hours')`,
+    [userId, digestToken(rawToken)],
+  );
+  await client.query(
+    `INSERT INTO outbox_events(aggregate_type, aggregate_id, event_type, payload)
+     VALUES ('USER', $1, 'email.confirmation_requested', $2::jsonb)`,
+    [
+      userId,
+      JSON.stringify({
+        confirmationTokenEnvelope: sealServerValue(rawToken),
+        recipientEmail,
+      }),
+    ],
+  );
+}
+
 export function registerAuthRoutes(router: Router): void {
   router.get("/security/csrf", (request, response) => {
     const existing = request.cookies[CSRF_COOKIE];
     const token = typeof existing === "string" ? existing : newOpaqueToken();
     response.cookie(CSRF_COOKIE, token, csrfCookieOptions).json({ ok: true });
+  });
+
+  router.get("/auth/providers", (_request, response) => {
+    response.json({ google: Boolean(config.google.clientId && config.google.clientSecret) });
   });
 
   router.get(
@@ -131,17 +162,64 @@ export function registerAuthRoutes(router: Router): void {
         if (!user) {
           return;
         }
-        await client.query("INSERT INTO user_roles(user_id, role) VALUES ($1, 'BUYER')", [user.id]);
+        await client.query("INSERT INTO user_roles(user_id, role) VALUES ($1, 'CUSTOMER')", [user.id]);
         await client.query(
           `INSERT INTO audit_events(actor_user_id, action, target_type, target_id)
            VALUES ($1, 'AUTH_REGISTERED', 'USER', $1)`,
           [user.id],
         );
+        await enqueueEmailVerification(client, user.id, input.email);
       });
 
       response.status(202).json({
         message: "Solicitação processada. Você poderá entrar caso a conta tenha sido criada.",
       });
+    }),
+  );
+
+  router.post(
+    "/auth/email-verification",
+    authLimiter,
+    csrfProtection,
+    asyncRoute(async (request, response) => {
+      const input = parseBody(emailVerificationSchema, request.body);
+      await transaction(async (client) => {
+        const found = await client.query<{ id: string; user_id: string }>(
+          `SELECT id, user_id
+             FROM email_confirmation_tokens
+            WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+            FOR UPDATE`,
+          [digestToken(input.token)],
+        );
+        const token = found.rows[0];
+        if (!token) {
+          throw new AppError(400, "INVALID_REQUEST");
+        }
+        await client.query("UPDATE email_confirmation_tokens SET used_at = now() WHERE id = $1", [token.id]);
+        await client.query("UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()), updated_at = now() WHERE id = $1", [token.user_id]);
+        await client.query(
+          `INSERT INTO audit_events(actor_user_id, action, target_type, target_id)
+           VALUES ($1, 'EMAIL_VERIFIED', 'USER', $1)`,
+          [token.user_id],
+        );
+      });
+      response.json({ message: "E-mail confirmado com segurança." });
+    }),
+  );
+
+  router.post(
+    "/auth/email-verification/resend",
+    authLimiter,
+    csrfProtection,
+    asyncRoute(async (request, response) => {
+      if (!config.smtpUrl || !config.smtpFrom) {
+        throw new AppError(503, "EMAIL_DELIVERY_UNAVAILABLE");
+      }
+      const user = await requireSession(request);
+      if (!user.emailVerified) {
+        await transaction((client) => enqueueEmailVerification(client, user.id, user.email));
+      }
+      response.status(202).json({ message: "Se necessário, enviaremos uma nova confirmação para seu e-mail." });
     }),
   );
 
@@ -209,6 +287,7 @@ export function registerAuthRoutes(router: Router): void {
 
       response
         .cookie(SESSION_COOKIE, session.token, { ...sessionCookieOptions, maxAge: session.maxAgeMs })
+        .cookie(ACCESS_TOKEN_COOKIE, issueAccessToken({ sessionId: session.sessionId, userId: session.userId }), accessTokenCookieOptions)
         .status(200)
         .json({ message: "Login realizado com segurança." });
     }),
@@ -221,6 +300,7 @@ export function registerAuthRoutes(router: Router): void {
       await revokeCurrentSession(request);
       response
         .clearCookie(SESSION_COOKIE, sessionCookieOptions)
+        .clearCookie(ACCESS_TOKEN_COOKIE, accessTokenCookieOptions)
         .status(204)
         .send();
     }),
@@ -321,7 +401,7 @@ export function registerAuthRoutes(router: Router): void {
     try {
       response.redirect(await beginGoogleAuthorization());
     } catch {
-      console.error("Google OAuth initiation failed");
+      logger.warn("início do OAuth Google falhou");
       response.redirect("/static/elitehub.html?auth_error=google_unavailable");
     }
   }));
@@ -337,12 +417,25 @@ export function registerAuthRoutes(router: Router): void {
       const session = await completeGoogleAuthorization(code, state);
       response
         .cookie(SESSION_COOKIE, session.token, { ...sessionCookieOptions, maxAge: session.maxAgeMs })
+        .cookie(ACCESS_TOKEN_COOKIE, issueAccessToken({ sessionId: session.sessionId, userId: session.userId }), accessTokenCookieOptions)
         .redirect("/static/elitehub.html");
     } catch {
-      console.error("Google OAuth callback failed");
+      logger.warn("callback do OAuth Google falhou");
       response.redirect("/static/elitehub.html?auth_error=google_callback_failed");
     }
   }));
+
+  router.post(
+    "/auth/refresh",
+    csrfProtection,
+    asyncRoute(async (request, response) => {
+      const session = await rotateCurrentSession(request);
+      response
+        .cookie(SESSION_COOKIE, session.token, { ...sessionCookieOptions, maxAge: session.maxAgeMs })
+        .cookie(ACCESS_TOKEN_COOKIE, issueAccessToken({ sessionId: session.sessionId, userId: session.userId }), accessTokenCookieOptions)
+        .json({ message: "Sessão renovada com segurança." });
+    }),
+  );
 
   router.get(
     "/auth/require-session",

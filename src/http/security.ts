@@ -6,11 +6,20 @@ import { config } from "../config.js";
 import { AppError } from "./errors.js";
 
 export const SESSION_COOKIE = "elitehub_session";
+export const ACCESS_TOKEN_COOKIE = "elitehub_access";
 export const CSRF_COOKIE = "elitehub_csrf";
 
 export const sessionCookieOptions: CookieOptions = {
   httpOnly: true,
   maxAge: 1000 * 60 * 60 * 8,
+  path: "/",
+  sameSite: "lax",
+  secure: config.isProduction,
+};
+
+export const accessTokenCookieOptions: CookieOptions = {
+  httpOnly: true,
+  maxAge: 1000 * 60 * 15,
   path: "/",
   sameSite: "lax",
   secure: config.isProduction,

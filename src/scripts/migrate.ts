@@ -1,12 +1,28 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { closePool, transaction } from "../db/pool.js";
 
-const migrationsDirectory = join(process.cwd(), "src", "db", "migrations");
+async function migrationsDirectory(): Promise<string> {
+  const candidates = [
+    join(process.cwd(), "dist", "db", "migrations"),
+    join(process.cwd(), "src", "db", "migrations"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(candidate)).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("Diretório de migrações SQL não encontrado.");
+}
 
 async function migrate(): Promise<void> {
-  const names = (await readdir(migrationsDirectory))
+  const directory = await migrationsDirectory();
+  const names = (await readdir(directory))
     .filter((name) => /^\d+_[a-z0-9_]+\.sql$/i.test(name))
     .sort();
 
@@ -23,10 +39,10 @@ async function migrate(): Promise<void> {
         return;
       }
 
-      const sql = await readFile(join(migrationsDirectory, name), "utf8");
+      const sql = await readFile(join(directory, name), "utf8");
       await client.query(sql);
       await client.query("INSERT INTO schema_migrations(name) VALUES ($1)", [name]);
-      console.log(`Applied migration ${name}`);
+      console.log(`Migração aplicada: ${name}`);
     });
   }
 }
@@ -34,8 +50,8 @@ async function migrate(): Promise<void> {
 migrate()
   .then(async () => closePool())
   .catch(async (error: unknown) => {
-    console.error("Migration failed", {
-      message: error instanceof Error ? error.message : "Unknown error",
+    console.error("migração falhou", {
+      message: error instanceof Error ? error.message : "Erro desconhecido",
     });
     await closePool();
     process.exitCode = 1;

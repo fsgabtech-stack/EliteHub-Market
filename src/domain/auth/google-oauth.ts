@@ -72,7 +72,7 @@ function decryptContext(ciphertext: string): OAuthContext {
       typeof (value as OAuthContext).nonce !== "string" ||
       typeof (value as OAuthContext).codeVerifier !== "string"
     ) {
-      throw new Error("Invalid OAuth context");
+      throw new Error("Contexto OAuth inválido");
     }
     return value as OAuthContext;
   } catch {
@@ -181,7 +181,7 @@ async function exchangeCode(code: string, context: OAuthContext): Promise<Google
   }
   const email = payload.email.trim().toLowerCase();
   const rawName = typeof payload.name === "string" ? payload.name.trim().replace(/\s+/g, " ") : "";
-  const fullName = rawName.length >= 3 && rawName.length <= 160 ? rawName : email.split("@")[0]!.slice(0, 160);
+  const fullName = rawName.length >= 3 && rawName.length <= 160 ? rawName : (email.split("@")[0] ?? email).slice(0, 160);
   return { email, fullName, subject: payload.sub };
 }
 
@@ -207,8 +207,12 @@ async function findOrCreateGoogleUser(identity: GoogleIdentity): Promise<string>
          RETURNING id`,
         [identity.fullName, identity.email],
       );
-      userId = created.rows[0]!.id;
-      await client.query("INSERT INTO user_roles(user_id, role) VALUES ($1, 'BUYER')", [userId]);
+      const createdUser = created.rows[0];
+      if (!createdUser) {
+        throw unavailable();
+      }
+      userId = createdUser.id;
+      await client.query("INSERT INTO user_roles(user_id, role) VALUES ($1, 'CUSTOMER')", [userId]);
     } else {
       const providerForUser = await client.query<{ provider_subject: string }>(
         "SELECT provider_subject FROM oauth_identities WHERE user_id = $1 AND provider = 'GOOGLE' FOR UPDATE",
@@ -238,7 +242,7 @@ async function findOrCreateGoogleUser(identity: GoogleIdentity): Promise<string>
 export async function completeGoogleAuthorization(
   code: string,
   state: string,
-): Promise<{ maxAgeMs: number; token: string }> {
+): Promise<{ maxAgeMs: number; sessionId: string; token: string; userId: string }> {
   const context = await consumeContext(state);
   const identity = await exchangeCode(code, context);
   const userId = await findOrCreateGoogleUser(identity);
