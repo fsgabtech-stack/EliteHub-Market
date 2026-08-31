@@ -1,10 +1,10 @@
 import {
-  createContext,
+  lazy,
+  Suspense,
   type FormEvent,
   type PropsWithChildren,
   type ReactNode,
   useCallback,
-  useContext,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -14,59 +14,20 @@ import {
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { type Aviso, type ContextoMercado, MercadoContext, type ModoAutenticacao, type Provedores, useMercado } from "./app/mercado-context";
 import { FalhaDaApi, mensagemPublica, requisicao } from "./api";
-import type { Carrinho, Endereco, Produto, ProdutoResumo, UsuarioDaSessao } from "./types";
+import { obterAcaoPendente, retomarAcaoPendente, salvarAcaoPendente, type AcaoPendente } from "./auth/pending-action";
+import { ConteudoProtegido } from "./routes/ConteudoProtegido";
+import type { Produto, ProdutoResumo, UsuarioDaSessao } from "./types";
 
-type ModoAutenticacao = "welcome" | "login" | "register" | "recovery" | "reset";
-type Provedores = { google: boolean; microsoft: boolean };
 type Paginacao = { hasNext: boolean; limit: number; offset: number; total: number };
-type AcaoPendente =
-  | { destination: string; kind: "cart"; productId: string; variantId?: string }
-  | { kind: "favorite"; productId: string }
-  | { kind: "route"; path: string };
 type EstadoAutenticacao = { mensagem: string; modo: ModoAutenticacao; resetToken?: string };
-type Aviso = { kind: "error" | "info" | "success"; message: string };
 
-type ContextoMercado = {
-  abrirAutenticacao: (message: string, action?: AcaoPendente, mode?: ModoAutenticacao) => void;
-  abrirRotaProtegida: (path: string, message: string) => void;
-  adicionarAoCarrinho: (productId: string, variantId: string | undefined, destination: string) => Promise<void>;
-  favoritos: ReadonlySet<string>;
-  providers: Provedores;
-  publicarAviso: (message: string, kind?: Aviso["kind"]) => void;
-  sair: () => Promise<void>;
-  toggleFavorito: (productId: string) => Promise<void>;
-  user: UsuarioDaSessao | null;
-};
-
-const MercadoContext = createContext<ContextoMercado | null>(null);
-
-function useMercado(): ContextoMercado {
-  const context = useContext(MercadoContext);
-  if (!context) throw new Error("O contexto da EliteHub não está disponível.");
-  return context;
-}
-
-function obterAcaoPendente(): AcaoPendente | null {
-  try {
-    const raw = sessionStorage.getItem("elitehub-pending-action");
-    if (!raw) return null;
-    const candidate: unknown = JSON.parse(raw);
-    if (!candidate || typeof candidate !== "object" || !("kind" in candidate)) return null;
-    return candidate as AcaoPendente;
-  } catch {
-    return null;
-  }
-}
-
-function salvarAcaoPendente(action: AcaoPendente | null): void {
-  try {
-    if (!action) sessionStorage.removeItem("elitehub-pending-action");
-    else sessionStorage.setItem("elitehub-pending-action", JSON.stringify(action));
-  } catch {
-    return;
-  }
-}
+const CarrinhoPage = lazy(async () => import("./cart/CarrinhoPage").then((module) => ({ default: module.CarrinhoPage })));
+const CheckoutPage = lazy(async () => import("./checkout/CheckoutPage").then((module) => ({ default: module.CheckoutPage })));
+const ContaPage = lazy(async () => import("./account/ContaPage").then((module) => ({ default: module.ContaPage })));
+const VendedorPage = lazy(async () => import("./seller/VendedorPage").then((module) => ({ default: module.VendedorPage })));
+const AdministracaoPage = lazy(async () => import("./admin/AdministracaoPage").then((module) => ({ default: module.AdministracaoPage })));
 
 function currency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { currency: "BRL", style: "currency" }).format(value / 100);
@@ -124,6 +85,7 @@ function ProvedorDoMercado({ children }: PropsWithChildren): ReactNode {
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState<UsuarioDaSessao | null>(null);
+  const [sessaoVerificada, setSessaoVerificada] = useState(false);
   const [providers, setProviders] = useState<Provedores>({ google: false, microsoft: false });
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [auth, setAuth] = useState<EstadoAutenticacao | null>(null);
@@ -170,6 +132,7 @@ function ProvedorDoMercado({ children }: PropsWithChildren): ReactNode {
       }
       const session = await refreshSession();
       if (active && session) await atualizarFavoritos();
+      if (active) setSessaoVerificada(true);
     })();
     return () => { active = false; };
   }, [atualizarFavoritos, publicarAviso, refreshSession]);
@@ -211,19 +174,13 @@ function ProvedorDoMercado({ children }: PropsWithChildren): ReactNode {
     salvarAcaoPendente(null);
     if (!action) return;
     try {
-      if (action.kind === "route") {
-        navigate(action.path);
-        return;
-      }
-      if (action.kind === "cart") {
-        await requisicao("/api/v1/cart/items", { body: JSON.stringify({ productId: action.productId, quantity: 1, ...(action.variantId ? { variantId: action.variantId } : {}) }), method: "PUT" });
-        publicarAviso("Produto adicionado ao carrinho.", "success");
-        navigate(action.destination);
-        return;
-      }
-      await requisicao(`/api/v1/favorites/${action.productId}`, { method: "POST" });
-      setFavorites((current) => new Set(current).add(action.productId));
-      publicarAviso("Produto salvo nos favoritos.", "success");
+      await retomarAcaoPendente({
+        action,
+        adicionarFavorito: (productId) => setFavorites((current) => new Set(current).add(productId)),
+        navegar: navigate,
+        publicarAviso,
+        requisicao,
+      });
     } catch (error) {
       publicarAviso(mensagemPublica(error));
     }
@@ -283,7 +240,7 @@ function ProvedorDoMercado({ children }: PropsWithChildren): ReactNode {
     }
   }, [navigate, publicarAviso]);
 
-  const value = useMemo<ContextoMercado>(() => ({ abrirAutenticacao, abrirRotaProtegida, adicionarAoCarrinho, favoritos: favorites, providers, publicarAviso, sair, toggleFavorito, user }), [abrirAutenticacao, abrirRotaProtegida, adicionarAoCarrinho, favorites, providers, publicarAviso, sair, toggleFavorito, user]);
+  const value = useMemo<ContextoMercado>(() => ({ abrirAutenticacao, abrirRotaProtegida, adicionarAoCarrinho, favoritos: favorites, providers, publicarAviso, sair, sessaoVerificada, toggleFavorito, user }), [abrirAutenticacao, abrirRotaProtegida, adicionarAoCarrinho, favorites, providers, publicarAviso, sair, sessaoVerificada, toggleFavorito, user]);
 
   return <MercadoContext.Provider value={value}>
     <Cabecalho />
@@ -376,6 +333,7 @@ function Cabecalho(): ReactNode {
               <Link to="/pedidos" role="menuitem" onClick={() => setMenu(false)}>Meus pedidos</Link>
               <Link to="/favoritos" role="menuitem" onClick={() => setMenu(false)}>Favoritos</Link>
               {user.roles.includes("SELLER") ? <Link to="/vendedor" role="menuitem" onClick={() => setMenu(false)}>Área do vendedor</Link> : null}
+              {user.roles.includes("ADMIN") ? <Link to="/admin" role="menuitem" onClick={() => setMenu(false)}>Administração</Link> : null}
               <button className="menu-danger" type="button" role="menuitem" onClick={() => void sair()}>Sair</button>
             </> : <>
               <button type="button" role="menuitem" onClick={() => { setMenu(false); abrirAutenticacao("Entre para acessar sua conta.", undefined, "login"); }}>Entrar</button>
@@ -620,26 +578,30 @@ function LojaPublica(): ReactNode {
 }
 
 function AreaProtegida({ children, message }: PropsWithChildren<{ message: string }>): ReactNode {
-  const { abrirRotaProtegida, user } = useMercado();
+  const { abrirRotaProtegida, sessaoVerificada, user } = useMercado();
   const location = useLocation();
-  const called = useRef(false);
-  useEffect(() => {
-    if (!user && !called.current) { called.current = true; abrirRotaProtegida(`${location.pathname}${location.search}`, message); }
-  }, [abrirRotaProtegida, location.pathname, location.search, message, user]);
-  return user ? children : <Carregando label="Aguardando autenticação" />;
+  if (!sessaoVerificada) return <Carregando label="Verificando sessão" />;
+  return <ConteudoProtegido authenticated={Boolean(user)} destination={`${location.pathname}${location.search}`} fallback={<Carregando label="Aguardando autenticação" />} message={message} onRequireAuthentication={abrirRotaProtegida}>{children}</ConteudoProtegido>;
 }
 
 function PainelPrivado({ children, description, title }: PropsWithChildren<{ description: string; title: string }>): ReactNode {
   return <motion.section className="account-panel" initial={{ opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 320, damping: 30 }}><Link className="back-link" to="/catalogo">Voltar ao catálogo</Link><h1>{title}</h1><p>{description}</p>{children}</motion.section>;
 }
 
-function CarrinhoPage(): ReactNode {
+/* Implementações migradas para os módulos de carrinho e checkout.
+function CarrinhoPageLegado(): ReactNode {
   const [cart, setCart] = useState<Carrinho | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => { try { setError(null); const result = await requisicao<{ cart: Carrinho }>("/api/v1/cart"); setCart(result.cart); } catch (failure) { setError(mensagemPublica(failure)); } }, []);
   useEffect(() => { void load(); }, [load]);
-  const remove = async (id: string) => { try { const result = await requisicao<{ cart: Carrinho }>(`/api/v1/cart/items/${id}`, { method: "DELETE" }); setCart(result.cart); } catch (failure) { setError(mensagemPublica(failure)); } };
-  return <AreaProtegida message="Entre para acessar seu carrinho."><PainelPrivado title="Meu carrinho" description="Seus itens são vinculados à sua sessão segura.">{error ? <EstadoVazio title="Não foi possível carregar o carrinho" description={error} /> : !cart ? <Carregando /> : !cart.items.length ? <EstadoVazio title="Seu carrinho está vazio" description="Explore o catálogo para adicionar produtos." action={<Link className="button button--primary" to="/catalogo">Explorar catálogo</Link>} /> : <><div className="cart-list">{cart.items.map((item) => <motion.article className="cart-item" key={item.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -16 }}><>{item.imageUrl ? <img src={item.imageUrl} alt={item.product.title} /> : <div className="product-card__image">Sem imagem</div>}</><div><h2>{item.product.title}</h2><p>Quantidade: {item.quantity}</p>{item.variant ? <p>Variação: {Object.values(item.variant.attributes).map(String).join(" · ")}</p> : null}</div><div><p className="cart-item__price">{currency(item.unitPriceCents * item.quantity)}</p><button className="text-button" type="button" onClick={() => void remove(item.id)}>Remover</button></div></motion.article>)}</div><div className="cart-summary"><div><span>Subtotal</span><strong>{currency(cart.subtotalCents)}</strong></div><Link className="button button--primary" to="/checkout">Continuar compra</Link></div></>}</PainelPrivado></AreaProtegida>;
+  const remove = async (id: string) => { try { setCart(await removerItem(requisicao, id)); } catch (failure) { setError(mensagemPublica(failure)); } };
+  const setQuantity = async (item: Carrinho["items"][number], quantity: number) => {
+    if (quantity < 1) { await remove(item.id); return; }
+    try {
+      setCart(await definirQuantidade(requisicao, item, quantity));
+    } catch (failure) { setError(mensagemPublica(failure)); }
+  };
+  return <AreaProtegida message="Entre para acessar seu carrinho."><PainelPrivado title="Meu carrinho" description="Seus itens são vinculados à sua sessão segura.">{error ? <EstadoVazio title="Não foi possível carregar o carrinho" description={error} /> : !cart ? <Carregando /> : !cart.items.length ? <EstadoVazio title="Seu carrinho está vazio" description="Explore o catálogo para adicionar produtos." action={<Link className="button button--primary" to="/catalogo">Explorar catálogo</Link>} /> : <><div className="cart-list">{cart.items.map((item) => <motion.article className="cart-item" key={item.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -16 }}><>{item.imageUrl ? <img src={item.imageUrl} alt={item.product.title} /> : <div className="product-card__image">Sem imagem</div>}</><div><h2>{item.product.title}</h2><div className="quantity-control-react" aria-label={`Quantidade de ${item.product.title}`}><button type="button" onClick={() => void setQuantity(item, item.quantity - 1)} aria-label="Diminuir quantidade">−</button><output>{item.quantity}</output><button type="button" disabled={item.quantity >= item.stockQuantity} onClick={() => void setQuantity(item, item.quantity + 1)} aria-label="Aumentar quantidade">+</button></div>{item.variant ? <p>Variação: {Object.values(item.variant.attributes).map(String).join(" · ")}</p> : null}</div><div><p className="cart-item__price">{currency(item.unitPriceCents * item.quantity)}</p><button className="text-button" type="button" onClick={() => void remove(item.id)}>Remover</button></div></motion.article>)}</div><div className="cart-summary"><div><span>Subtotal</span><strong>{currency(cart.subtotalCents)}</strong></div><Link className="button button--primary" to="/checkout">Continuar compra</Link></div></>}</PainelPrivado></AreaProtegida>;
 }
 
 function addressText(item: Endereco): string {
@@ -659,7 +621,7 @@ function FormEndereco({ saved }: { saved: () => Promise<void> }): ReactNode {
   return <form className="form-stack address-form-react" onSubmit={submit}><label className="field-group"><span>Identificação</span><input name="label" placeholder="Casa" required /></label><label className="field-group"><span>Destinatário</span><input name="recipientName" placeholder="Nome completo" required /></label><label className="field-group"><span>CEP</span><input name="postalCode" inputMode="numeric" placeholder="Somente números" required /></label><label className="field-group"><span>Rua</span><input name="street" required /></label><label className="field-group"><span>Número</span><input name="number" required /></label><label className="field-group"><span>Complemento</span><input name="complement" /></label><label className="field-group"><span>Bairro</span><input name="neighborhood" required /></label><label className="field-group"><span>Cidade</span><input name="city" required /></label><label className="field-group"><span>UF</span><input name="state" maxLength={2} placeholder="SP" required /></label><button className="button button--secondary" type="submit" disabled={loading}>{loading ? "Salvando" : "Salvar endereço"}</button></form>;
 }
 
-function CheckoutPage(): ReactNode {
+function CheckoutPageLegado(): ReactNode {
   const { publicarAviso } = useMercado();
   const navigate = useNavigate();
   const [cart, setCart] = useState<Carrinho | null>(null);
@@ -670,11 +632,17 @@ function CheckoutPage(): ReactNode {
   const load = useCallback(async () => { setLoading(true); try { const [cartResult, addressResult] = await Promise.all([requisicao<{ cart: Carrinho }>("/api/v1/cart"), requisicao<{ items: Endereco[] }>("/api/v1/addresses")]); setCart(cartResult.cart); setAddresses(addressResult.items); setSelectedAddress(addressResult.items[0]?.id); } catch (failure) { publicarAviso(mensagemPublica(failure)); } finally { setLoading(false); } }, [publicarAviso]);
   useEffect(() => { void load(); }, [load]);
   const createOrder = async () => {
-    if (!selectedAddress) { publicarAviso("Selecione um endereço para continuar."); return; }
-    try { await requisicao("/api/v1/checkout", { body: JSON.stringify({ addressId: selectedAddress, paymentMethod: payment }), headers: { "idempotency-key": crypto.randomUUID() }, method: "POST" }); publicarAviso("Pedido criado. Siga as instruções do provedor de pagamento.", "success"); navigate("/pedidos"); } catch (failure) { publicarAviso(mensagemPublica(failure)); }
+    if (!selectedAddress || !checkoutDisponivel(cart, selectedAddress)) { publicarAviso("Selecione um endereço e mantenha itens no carrinho para continuar."); return; }
+    try {
+      const result = await enviarCheckout(requisicao, { addressId: selectedAddress, paymentMethod: payment }, crypto.randomUUID());
+      publicarAviso(result.payment.integrationPending ? "Pedido criado e estoque reservado. Nenhuma cobrança foi realizada: o pagamento local ainda não está integrado." : "Pedido criado. Siga as instruções do provedor de pagamento.", "success");
+      navigate("/pedidos");
+    } catch (failure) { publicarAviso(mensagemPublica(failure)); }
   };
   return <AreaProtegida message="Entre para continuar sua compra com segurança."><PainelPrivado title="Finalizar compra" description="Confirme o endereço e escolha o meio de pagamento disponível.">{loading ? <Carregando /> : !cart?.items.length ? <EstadoVazio title="Seu carrinho está vazio" description="Adicione produtos antes de finalizar a compra." action={<Link className="button button--primary" to="/catalogo">Ver catálogo</Link>} /> : <div className="checkout-grid"><section className="cart-panel"><h2>Endereço de entrega</h2>{addresses.length ? <div className="address-list">{addresses.map((address) => <label className="address-choice" key={address.id}><input type="radio" name="address" checked={selectedAddress === address.id} onChange={() => setSelectedAddress(address.id)} /><span><strong>{address.label}</strong>{addressText(address)}</span></label>)}</div> : <><p>Cadastre um endereço para continuar.</p><FormEndereco saved={load} /></>}</section>{addresses.length ? <section className="cart-panel"><h2>Pagamento</h2><p>A confirmação é feita pelo provedor configurado no servidor.</p><div className="payment-options">{(["PIX", "CREDIT_CARD", "BOLETO"] as const).map((method) => <label key={method}><input type="radio" name="payment" checked={payment === method} onChange={() => setPayment(method)} /><span>{method === "PIX" ? "Pix" : method === "CREDIT_CARD" ? "Cartão" : "Boleto"}</span></label>)}</div><div className="cart-summary"><div><span>Subtotal</span><strong>{currency(cart.subtotalCents)}</strong></div><button className="button button--primary" type="button" onClick={() => void createOrder()}>Criar pedido</button></div></section> : null}</div>}</PainelPrivado></AreaProtegida>;
 }
+
+*/
 
 function FavoritosPage(): ReactNode {
   const [items, setItems] = useState<Array<{ id: string; imageUrl: string | null; priceCents: number; title: string }> | null>(null);
@@ -702,7 +670,8 @@ function PedidosPage(): ReactNode {
   return <AreaProtegida message="Entre para acessar seus pedidos."><PainelPrivado title="Meus pedidos" description="Acompanhe seus pedidos e os respectivos status.">{user?.roles.includes("SELLER") ? <div className="page-tabs" role="tablist"><button type="button" role="tab" aria-selected={scope === "mine"} onClick={() => setScope("mine")}>Minhas compras</button><button type="button" role="tab" aria-selected={scope === "received"} onClick={() => setScope("received")}>Vendas recebidas</button></div> : null}{error ? <EstadoVazio title="Não foi possível carregar os pedidos" description={error} /> : !items ? <Carregando /> : !items.length ? <EstadoVazio title="Você ainda não tem pedidos" description="Quando concluir uma compra, ela aparecerá nesta área." /> : <div className="notification-list">{items.map((item) => <motion.article className="notification-item" key={item.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}><div><h2>Pedido {item.number}</h2><p>{currency(item.totalCents)} · {item.status} · pagamento {item.paymentStatus}</p></div><time dateTime={item.createdAt}>{date(item.createdAt)}</time></motion.article>)}</div>}</PainelPrivado></AreaProtegida>;
 }
 
-function ContaPage(): ReactNode {
+/* Implementações migradas para os módulos de conta, vendedor e administração.
+function ContaPageLegado(): ReactNode {
   const { publicarAviso, sair, user } = useMercado();
   const [deleting, setDeleting] = useState(false);
   if (!user) return null;
@@ -714,7 +683,7 @@ function ContaPage(): ReactNode {
   return <AreaProtegida message="Entre para acessar sua conta."><PainelPrivado title="Minha conta" description="Informações da sessão atualmente ativa."><section className="info-panel"><h2>{user.fullName}</h2><p>{user.email}</p><p className={`stock ${user.emailVerified ? "stock--available" : "stock--unavailable"}`}>{user.emailVerified ? "E-mail confirmado" : "E-mail ainda não confirmado"}</p><div className="product-actions"><Link className="button button--secondary" to="/pedidos">Meus pedidos</Link><Link className="button button--secondary" to="/favoritos">Favoritos</Link>{user.roles.includes("SELLER") ? <Link className="button button--secondary" to="/vendedor">Área do vendedor</Link> : null}</div></section><section className="info-panel account-privacy-react"><h2>Privacidade e dados</h2><p>Você pode exportar seus dados pessoais ou solicitar anonimização quando não houver pedidos ativos.</p><div className="product-actions"><a className="button button--secondary" href="/api/v1/account/data-export">Exportar meus dados</a><button className="button button--secondary danger-button-react" type="button" disabled={deleting} onClick={() => void remove()}>{deleting ? "Anonimizando" : "Excluir e anonimizar conta"}</button></div></section></PainelPrivado></AreaProtegida>;
 }
 
-function VendedorPage(): ReactNode {
+function VendedorPageLegado(): ReactNode {
   const { publicarAviso, user } = useMercado();
   const [profile, setProfile] = useState<{ approvalStatus: string; description: string | null; legalName: string | null; storeName: string; supportEmail: string | null } | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -723,6 +692,35 @@ function VendedorPage(): ReactNode {
   const onboarding = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); try { const result = await requisicao<{ message: string }>("/api/v1/seller/onboarding", { body: JSON.stringify({ description: String(data.get("description") ?? "") || undefined, legalName: String(data.get("legalName") ?? "") || undefined, storeName: String(data.get("storeName") ?? ""), supportEmail: String(data.get("supportEmail") ?? "") || undefined }), method: "POST" }); publicarAviso(result.message, "success"); await load(); } catch (failure) { publicarAviso(mensagemPublica(failure)); } };
   return <AreaProtegida message="Entre para acessar a área do vendedor."><PainelPrivado title="Área do vendedor" description="Onboarding e situação da sua loja na EliteHub.">{!loaded ? <Carregando /> : profile ? <section className="info-panel"><p className="eyebrow">Situação: {profile.approvalStatus}</p><h2>{profile.storeName}</h2><p>{profile.description ?? "Sem descrição pública cadastrada."}</p><p>{profile.supportEmail ?? "Sem e-mail de suporte cadastrado."}</p>{profile.approvalStatus !== "APPROVED" ? <p className="stock stock--unavailable">A publicação de produtos depende da aprovação administrativa.</p> : <p className="stock stock--available">Sua loja está aprovada. As APIs de produtos e estoque estão disponíveis sob sua sessão.</p>}</section> : <section className="info-panel"><h2>Solicitar conta de vendedor</h2><p>Envie os dados da loja. A aprovação é realizada por um administrador.</p><form className="form-stack" onSubmit={onboarding}><label className="field-group"><span>Nome da loja</span><input name="storeName" minLength={3} required /></label><label className="field-group"><span>Razão social</span><input name="legalName" minLength={3} /></label><label className="field-group"><span>Descrição pública</span><textarea name="description" minLength={20} /></label><label className="field-group"><span>E-mail de suporte</span><input name="supportEmail" type="email" /></label><button className="button button--primary" type="submit">Enviar para aprovação</button></form></section>}</PainelPrivado></AreaProtegida>;
 }
+
+function AdministracaoPageLegado(): ReactNode {
+  const { publicarAviso, user } = useMercado();
+  const [sellers, setSellers] = useState<Array<{ approvalStatus: string; description: string | null; email: string; fullName: string; id: string; storeName: string }>>([]);
+  const [reviews, setReviews] = useState<Array<{ buyerName: string; id: string; productTitle: string; rating: number; text: string; title: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    if (!user?.roles.includes("ADMIN")) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const [sellerResult, reviewResult] = await Promise.all([
+        requisicao<{ items: Array<{ approvalStatus: string; description: string | null; email: string; fullName: string; id: string; storeName: string }> }>("/api/v1/admin/sellers?approvalStatus=PENDING"),
+        requisicao<{ items: Array<{ buyerName: string; id: string; productTitle: string; rating: number; text: string; title: string }> }>("/api/v1/admin/reviews?status=PENDING"),
+      ]);
+      setSellers(sellerResult.items); setReviews(reviewResult.items);
+    } catch (failure) { publicarAviso(mensagemPublica(failure)); }
+    finally { setLoading(false); }
+  }, [publicarAviso, user]);
+  useEffect(() => { void load(); }, [load]);
+  const atualizarVendedor = async (id: string, status: "APPROVED" | "REJECTED") => {
+    try { await requisicao(`/api/v1/admin/sellers/${id}/approval`, { body: JSON.stringify({ status }), method: "POST" }); publicarAviso(status === "APPROVED" ? "Vendedor aprovado." : "Vendedor recusado.", "success"); await load(); } catch (failure) { publicarAviso(mensagemPublica(failure)); }
+  };
+  const moderarAvaliacao = async (id: string, status: "PUBLISHED" | "HIDDEN" | "REJECTED") => {
+    try { await requisicao(`/api/v1/admin/reviews/${id}`, { body: JSON.stringify({ status }), method: "PATCH" }); publicarAviso(status === "PUBLISHED" ? "Avaliação publicada." : "Avaliação moderada.", "success"); await load(); } catch (failure) { publicarAviso(mensagemPublica(failure)); }
+  };
+  return <AreaProtegida message="Entre para acessar a administração."><PainelPrivado title="Administração" description="Filas reais de aprovação de vendedores e moderação de avaliações.">{!user?.roles.includes("ADMIN") ? <EstadoVazio title="Acesso restrito" description="Esta área exige a função administrativa." /> : loading ? <Carregando /> : <div className="admin-grid-react"><section className="info-panel"><p className="eyebrow">{sellers.length} pendentes</p><h2>Vendedores para análise</h2>{sellers.length ? <div className="admin-list-react">{sellers.map((seller) => <article key={seller.id}><h3>{seller.storeName}</h3><p>{seller.fullName} · {seller.email}</p><p>{seller.description ?? "Sem descrição pública."}</p><div className="admin-actions-react"><button className="button button--primary" type="button" onClick={() => void atualizarVendedor(seller.id, "APPROVED")}>Aprovar</button><button className="button button--secondary danger-button-react" type="button" onClick={() => void atualizarVendedor(seller.id, "REJECTED")}>Recusar</button></div></article>)}</div> : <p>Nenhum vendedor pendente.</p>}</section><section className="info-panel"><p className="eyebrow">{reviews.length} pendentes</p><h2>Avaliações para moderação</h2>{reviews.length ? <div className="admin-list-react">{reviews.map((review) => <article key={review.id}><p className="review-card__rating">★ {review.rating}/5</p><h3>{review.title}</h3><p>{review.text}</p><p>{review.buyerName} · {review.productTitle}</p><div className="admin-actions-react"><button className="button button--primary" type="button" onClick={() => void moderarAvaliacao(review.id, "PUBLISHED")}>Publicar</button><button className="button button--secondary" type="button" onClick={() => void moderarAvaliacao(review.id, "HIDDEN")}>Ocultar</button><button className="text-button" type="button" onClick={() => void moderarAvaliacao(review.id, "REJECTED")}>Recusar</button></div></article>)}</div> : <p>Nenhuma avaliação pendente.</p>}</section></div>}</PainelPrivado></AreaProtegida>;
+}
+
+*/
 
 function Ajuda(): ReactNode {
   useEffect(() => { document.title = "Ajuda | EliteHub Connect"; }, []);
@@ -736,7 +734,8 @@ function PaginaNaoEncontrada(): ReactNode {
 function Rotas(): ReactNode {
   const location = useLocation();
   const reduced = useReducedMotion();
-  return <AnimatePresence mode="wait"><motion.div className="route-page-react" key={location.pathname} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ type: "spring", stiffness: 330, damping: 32 }}><Routes location={location}><Route path="/" element={<Catalogo />} /><Route path="/catalogo" element={<Catalogo />} /><Route path="/produto/:id" element={<ProdutoDetalhe />} /><Route path="/loja/:id" element={<LojaPublica />} /><Route path="/carrinho" element={<CarrinhoPage />} /><Route path="/checkout" element={<CheckoutPage />} /><Route path="/favoritos" element={<FavoritosPage />} /><Route path="/notificacoes" element={<NotificacoesPage />} /><Route path="/pedidos" element={<PedidosPage />} /><Route path="/conta" element={<ContaPage />} /><Route path="/vendedor" element={<VendedorPage />} /><Route path="/ajuda" element={<Ajuda />} /><Route path="*" element={<PaginaNaoEncontrada />} /></Routes></motion.div></AnimatePresence>;
+  const fallback = <Carregando label="Carregando área" />;
+  return <AnimatePresence mode="wait"><motion.div className="route-page-react" key={location.pathname} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ type: "spring", stiffness: 330, damping: 32 }}><Routes location={location}><Route path="/" element={<Catalogo />} /><Route path="/catalogo" element={<Catalogo />} /><Route path="/produto/:id" element={<ProdutoDetalhe />} /><Route path="/loja/:id" element={<LojaPublica />} /><Route path="/carrinho" element={<Suspense fallback={fallback}><CarrinhoPage /></Suspense>} /><Route path="/checkout" element={<Suspense fallback={fallback}><CheckoutPage /></Suspense>} /><Route path="/favoritos" element={<FavoritosPage />} /><Route path="/notificacoes" element={<NotificacoesPage />} /><Route path="/pedidos" element={<PedidosPage />} /><Route path="/conta" element={<Suspense fallback={fallback}><ContaPage /></Suspense>} /><Route path="/vendedor" element={<Suspense fallback={fallback}><VendedorPage /></Suspense>} /><Route path="/admin" element={<Suspense fallback={fallback}><AdministracaoPage /></Suspense>} /><Route path="/ajuda" element={<Ajuda />} /><Route path="*" element={<PaginaNaoEncontrada />} /></Routes></motion.div></AnimatePresence>;
 }
 
 function AplicacaoInterna(): ReactNode {
