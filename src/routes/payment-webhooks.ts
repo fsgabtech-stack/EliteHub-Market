@@ -88,7 +88,7 @@ async function receiveWebhook(request: Request, response: Response): Promise<voi
       await client.query("UPDATE payment_webhook_receipts SET processed_at = now(), processing_error = NULL WHERE id = $1", [receipt.id]);
       await client.query(
         `INSERT INTO audit_events(action, target_type, metadata)
-         VALUES ('PAYMENT_WEBHOOK_PROCESSED', 'PAYMENT_WEBHOOK', jsonb_build_object('provider', $1, 'eventId', $2))`,
+         VALUES ('PAYMENT_WEBHOOK_PROCESSED', 'PAYMENT_WEBHOOK', jsonb_build_object('provider', $1::text, 'eventId', $2::text))`,
         [provider, identity.eventId],
       );
     });

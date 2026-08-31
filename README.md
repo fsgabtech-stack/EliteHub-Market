@@ -66,7 +66,7 @@ O cliente web é uma SPA React 19 compilada pelo Vite e entregue pelo Express em
 
 `framer-motion` controla transições de rota, modal de autenticação, cartões, listas, galeria e menus com springs amortecidas. O CSS preserva os tokens visuais da EliteHub e `prefers-reduced-motion` reduz movimento decorativo. A animação é limitada a propriedades compostas pelo navegador (`transform` e `opacity`) e os itens mantêm chaves estáveis para evitar desmontagens e reflow visual desnecessário.
 
-As rotas React implementadas são catálogo, produto, loja pública, carrinho, checkout, favoritos, notificações, pedidos, conta, onboarding de vendedor e ajuda. Endpoints administrativos e de gestão de produto continuam protegidos no backend; uma tela não é criada sem um fluxo de negócio autorizado e persistente.
+As rotas React implementadas são catálogo, produto, loja pública, carrinho, checkout, favoritos, notificações, pedidos, conta, onboarding de vendedor e ajuda. Carrinho, checkout, conta, vendedor e administração são carregados sob demanda por fronteira de rota, com fallback acessível. O contexto aguarda a verificação da sessão HttpOnly antes de abrir o gate de autenticação; assim, uma sessão válida em acesso direto a uma rota privada não recebe um falso pedido de login. Endpoints administrativos e de gestão de produto continuam protegidos no backend; uma tela não é criada sem um fluxo de negócio autorizado e persistente.
 
 ## Pré-requisitos
 
@@ -115,6 +115,28 @@ A interface React estará em [http://localhost:8001](http://localhost:8001). Ap�
 
 O serviço `migrate` é executado antes da API e do worker; acompanhe-o com `docker compose logs migrate`. Não aplique manualmente uma migração em paralelo ao Compose.
 
+### Dados locais de desenvolvimento
+
+A seed não é executada automaticamente. Ela exige simultaneamente `NODE_ENV=development` e `ELITEHUB_DEVELOPMENT_SEED=enabled`; fora desse contexto ela falha antes de gravar no banco. No Compose, execute-a explicitamente:
+
+```powershell
+$env:ELITEHUB_DEVELOPMENT_SEED = "enabled"
+docker compose --profile ferramentas run --rm seed
+```
+
+Contas exclusivamente locais de desenvolvimento:
+
+| Perfil | E-mail | Senha local |
+| --- | --- | --- |
+| Cliente | `cliente.dev@elitehub.local` | `ClienteEliteHub#2026` |
+| Vendedor aprovado | `vendedor.dev@elitehub.local` | `VendedorEliteHub#2026` |
+| Administrador | `admin.dev@elitehub.local` | `AdminEliteHub#2026` |
+| Vendedor pendente | `vendedor.pendente.dev@elitehub.local` | `PendenteEliteHub#2026` |
+
+Ela cria categorias, quatro produtos, variantes, imagens SVG locais, estoque inicial, endereço do cliente, pedido histórico entregue, cupom local e filas pendentes de aprovação/moderação. A operação é idempotente: repetir a seed não duplica essas entidades.
+
+`reset-development` apaga **todos os dados locais de desenvolvimento** e jamais deve ser apontado a banco compartilhado. Além de `NODE_ENV=development`, requer `ELITEHUB_DEVELOPMENT_RESET=enabled`. A suíte Playwright usa essa limpeza e a seed automaticamente para garantir repetibilidade; não a execute contra um banco que contenha dados que você queira preservar.
+
 O Docker não deve ser usado como prova de produção. Staging e produção exigem TLS, banco gerenciado com PITR, gestão de segredos, testes de restore, observabilidade e políticas financeiras aprovadas.
 
 ## Contratos HTTP
@@ -139,7 +161,7 @@ Rotas centrais:
 | Favoritos e notificações | `/api/v1/favorites`, `/api/v1/favorites/:productId`, `/api/v1/notifications` |
 | Pedidos | `/api/v1/orders`, `/api/v1/orders/:id`, `/api/v1/orders/:id/status` |
 | Vendedores | `/api/v1/seller/onboarding`, `/api/v1/seller/products`, `/api/v1/seller/products/:id/stock-adjustments` |
-| Administração | `/api/v1/admin/categories`, `/api/v1/admin/sellers/:id/approval`, `/api/v1/admin/coupons` |
+| Administração | `/api/v1/admin/categories`, `/api/v1/admin/sellers`, `/api/v1/admin/sellers/:id/approval`, `/api/v1/admin/reviews`, `/api/v1/admin/reviews/:id`, `/api/v1/admin/coupons` |
 | Arquivos | `/api/v1/seller/products/:id/images`, `/api/v1/files/:id` |
 | Webhooks | `/api/v1/payments/webhooks/mercado-pago`, `/api/v1/payments/webhooks/stripe` |
 
@@ -149,7 +171,7 @@ Em produção, `GET /metrics` exige `Authorization: Bearer <METRICS_BEARER_TOKEN
 
 ## Pagamentos e webhooks
 
-`PAYMENT_PROVIDER` aceita `mercado_pago`, `stripe` ou `disabled`. A ativação só é permitida com sandbox e política comercial explícita. O checkout não é liberado sem configuração de frete e comissão, evitando cobranças sem total financeiro aprovado.
+`PAYMENT_PROVIDER` aceita `mercado_pago`, `stripe` ou `disabled`. A ativação só é permitida com sandbox e política comercial explícita. O checkout não é liberado sem configuração de frete e comissão, evitando cobranças sem total financeiro aprovado. Com o provedor `disabled`, somente `NODE_ENV=development` pode criar um pedido real em `PENDING_PAYMENT`, reservar estoque e registrar auditoria; nenhuma cobrança, transação de pagamento ou aprovação é simulada. Em qualquer outro ambiente, o checkout continua recusado até que exista um provedor sandbox configurado.
 
 O webhook:
 
@@ -167,13 +189,15 @@ Não existe endpoint que marque pagamento aprovado a partir do navegador.
 ```powershell
 npm run lint
 npm run typecheck
-npm test
+npm run test:api
+npm run test:web
+npm run test:e2e
 npm run openapi:validate
 npm run build
 npm audit --omit=dev --audit-level=high
 ```
 
-Testes de integração com PostgreSQL, Redis e MinIO dependem de Docker ou de serviços locais configurados. Não considere a aplicação persistente funcional enquanto `npm run db:migrate` não terminar com sucesso e `GET /api/v1/ready` não retornar `200`.
+`npm run test:e2e` usa Playwright contra o Compose real: navegador → React entregue pelo Express → API Node → PostgreSQL. Instale o navegador uma única vez com `npx playwright install chromium`. Testes de integração com PostgreSQL, Redis e MinIO dependem de Docker ou de serviços locais configurados. Não considere a aplicação persistente funcional enquanto `npm run db:migrate` não terminar com sucesso e `GET /api/v1/ready` não retornar `200`.
 
 ## Operação e segurança
 

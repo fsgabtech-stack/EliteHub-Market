@@ -32,7 +32,7 @@ export function registerAccountRoutes(router: Router): void {
         );
         await client.query(
           `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
-           VALUES ($1, 'PRIVACY_CONSENT_UPDATED', 'USER', $1, jsonb_build_object('purpose', $2, 'granted', $3))`,
+           VALUES ($1, 'PRIVACY_CONSENT_UPDATED', 'USER', $1, jsonb_build_object('purpose', $2::text, 'granted', $3::boolean))`,
           [user.id, parsed.data.purpose, parsed.data.granted],
         );
       });

@@ -5,6 +5,8 @@ x-aplicacao: &aplicacao
     context: .
   environment:
     APP_ORIGIN: http://localhost:${API_HOST_PORT:-8001}
+    ELITEHUB_DEVELOPMENT_SEED: ${ELITEHUB_DEVELOPMENT_SEED:-}
+    ELITEHUB_DEVELOPMENT_RESET: ${ELITEHUB_DEVELOPMENT_RESET:-}
     API_RATE_LIMIT_MAX: ${API_RATE_LIMIT_MAX:-120}
     API_RATE_LIMIT_WINDOW_MS: ${API_RATE_LIMIT_WINDOW_MS:-60000}
     AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-20}
@@ -80,6 +82,18 @@ services:
   migrate:
     <<: *aplicacao
     command: ["node", "dist/scripts/migrate.js"]
+    restart: "no"
+
+  seed:
+    <<: *aplicacao
+    command: ["node", "dist/scripts/seed-development.js"]
+    profiles: ["ferramentas"]
+    restart: "no"
+
+  reset:
+    <<: *aplicacao
+    command: ["node", "dist/scripts/reset-development.js"]
+    profiles: ["ferramentas"]
     restart: "no"
 
   postgres:

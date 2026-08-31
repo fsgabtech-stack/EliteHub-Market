@@ -38,8 +38,91 @@ const couponSchema = couponFields.superRefine((value, context) => {
 });
 
 const sellerCouponSchema = couponFields.omit({ scope: true, sellerId: true });
+const sellerListSchema = z.object({ approvalStatus: z.enum(["INCOMPLETE", "PENDING", "APPROVED", "REJECTED"]).optional() });
+const reviewListSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20), status: z.enum(["PENDING", "PUBLISHED", "HIDDEN", "REJECTED"]).default("PENDING") });
 
 export function registerAdminRoutes(router: Router): void {
+  router.get(
+    "/admin/sellers",
+    asyncRoute(async (request, response) => {
+      const parsed = sellerListSchema.safeParse(request.query);
+      if (!parsed.success) throw invalidRequest();
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["ADMIN"]);
+      const values: unknown[] = [];
+      const condition = parsed.data.approvalStatus
+        ? (values.push(parsed.data.approvalStatus), `WHERE seller_profiles.approval_status = $${values.length}`)
+        : "";
+      const sellers = await query<{
+        approval_status: string;
+        created_at: Date;
+        description: string | null;
+        email: string;
+        full_name: string;
+        id: string;
+        store_name: string;
+      }>(
+        `SELECT seller_profiles.user_id AS id, seller_profiles.store_name, seller_profiles.description,
+                seller_profiles.approval_status, seller_profiles.created_at, users.full_name, users.email
+           FROM seller_profiles
+           JOIN users ON users.id = seller_profiles.user_id AND users.deleted_at IS NULL
+           ${condition}
+          ORDER BY seller_profiles.created_at ASC`,
+        values,
+      );
+      response.json({ items: sellers.rows.map((seller) => ({
+        approvalStatus: seller.approval_status,
+        createdAt: seller.created_at.toISOString(),
+        description: seller.description,
+        email: seller.email,
+        fullName: seller.full_name,
+        id: seller.id,
+        storeName: seller.store_name,
+      })) });
+    }),
+  );
+
+  router.get(
+    "/admin/reviews",
+    asyncRoute(async (request, response) => {
+      const parsed = reviewListSchema.safeParse(request.query);
+      if (!parsed.success) throw invalidRequest();
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["ADMIN", "SUPPORT"]);
+      const reviews = await query<{
+        body: string;
+        buyer_name: string;
+        created_at: Date;
+        id: string;
+        product_title: string;
+        rating: number;
+        status: string;
+        title: string;
+      }>(
+        `SELECT product_reviews.id, product_reviews.rating, product_reviews.title, product_reviews.body,
+                product_reviews.status, product_reviews.created_at, users.full_name AS buyer_name,
+                products.title AS product_title
+           FROM product_reviews
+           JOIN users ON users.id = product_reviews.buyer_id AND users.deleted_at IS NULL
+           JOIN products ON products.id = product_reviews.product_id AND products.deleted_at IS NULL
+          WHERE product_reviews.status = $1
+          ORDER BY product_reviews.created_at ASC
+          LIMIT $2`,
+        [parsed.data.status, parsed.data.limit],
+      );
+      response.json({ items: reviews.rows.map((review) => ({
+        buyerName: review.buyer_name,
+        createdAt: review.created_at.toISOString(),
+        id: review.id,
+        productTitle: review.product_title,
+        rating: review.rating,
+        status: review.status,
+        text: review.body,
+        title: review.title,
+      })) });
+    }),
+  );
+
   router.post(
     "/admin/categories",
     csrfProtection,
@@ -84,7 +167,7 @@ export function registerAdminRoutes(router: Router): void {
         }
         await client.query(
           `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
-           VALUES ($1, 'SELLER_APPROVAL_CHANGED', 'USER', $2, jsonb_build_object('status', $3))`,
+           VALUES ($1, 'SELLER_APPROVAL_CHANGED', 'USER', $2, jsonb_build_object('status', $3::text))`,
           [user.id, sellerId.data, status.data.status],
         );
       });

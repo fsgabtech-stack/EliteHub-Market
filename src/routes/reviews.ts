@@ -130,7 +130,7 @@ export function registerReviewRoutes(router: Router): void {
         }
         await client.query(
           `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
-           VALUES ($1, 'PRODUCT_REVIEW_SUBMITTED', 'PRODUCT_REVIEW', $2, jsonb_build_object('productId', $3))`,
+           VALUES ($1, 'PRODUCT_REVIEW_SUBMITTED', 'PRODUCT_REVIEW', $2, jsonb_build_object('productId', $3::uuid))`,
           [user.id, createdReview.id, productId.data],
         );
         return createdReview;
@@ -164,7 +164,7 @@ export function registerReviewRoutes(router: Router): void {
         }
         await client.query(
           `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
-           VALUES ($1, 'PRODUCT_REVIEW_MODERATED', 'PRODUCT_REVIEW', $2, jsonb_build_object('status', $3))`,
+           VALUES ($1, 'PRODUCT_REVIEW_MODERATED', 'PRODUCT_REVIEW', $2, jsonb_build_object('status', $3::text))`,
           [user.id, reviewId.data, moderation.data.status],
         );
         if (moderation.data.status === "PUBLISHED") {

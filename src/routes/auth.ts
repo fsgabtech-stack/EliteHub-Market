@@ -273,7 +273,7 @@ export function registerAuthRoutes(router: Router): void {
           );
           await client.query(
             `INSERT INTO audit_events(action, target_type, metadata)
-             VALUES ('AUTH_LOGIN_FAILED', 'EMAIL', jsonb_build_object('emailHash', $1))`,
+             VALUES ('AUTH_LOGIN_FAILED', 'EMAIL', jsonb_build_object('emailHash', $1::text))`,
             [digestToken(input.email)],
           );
           throw new AppError(401, "UNAUTHORIZED");

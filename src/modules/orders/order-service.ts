@@ -135,7 +135,7 @@ export async function transitionOrderStatus(input: {
     );
     await client.query(
       `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
-       VALUES ($1, 'ORDER_STATUS_CHANGED', 'ORDER', $2, jsonb_build_object('from', $3, 'to', $4))`,
+       VALUES ($1, 'ORDER_STATUS_CHANGED', 'ORDER', $2, jsonb_build_object('from', $3::text, 'to', $4::text))`,
       [input.user.id, order.id, order.status, input.targetStatus],
     );
     if (input.targetStatus === "CANCELLED") {

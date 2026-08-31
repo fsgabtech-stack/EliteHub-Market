@@ -127,7 +127,7 @@ export const documentoOpenApi = {
       patch: { description: "Marca uma notificação própria como lida.", responses: { "204": { description: "Notificação atualizada" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/checkout": {
-      post: { description: "Reserva estoque, cria pedido pendente de pagamento e publica evento transacional. Requer Idempotency-Key UUID.", responses: { "201": { description: "Pedido criado" }, "409": { description: "Conflito de estoque, vendedor ou idempotência" } }, security: [{ cookieSessao: [] }] },
+      post: { description: "Reserva estoque, cria pedido pendente de pagamento e publica evento transacional. Em desenvolvimento, um provedor desativado cria somente o pedido pendente, sem cobrança nem confirmação de pagamento; fora desse ambiente a configuração de provedor é obrigatória. Requer Idempotency-Key UUID.", responses: { "201": { description: "Pedido criado" }, "409": { description: "Conflito de estoque, vendedor ou idempotência" }, "503": { description: "Política comercial ou provedor de pagamento indisponível" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/orders": {
       get: { description: "Lista pedidos do comprador ou pedidos recebidos do vendedor.", responses: { "200": { description: "Pedidos paginados" } }, security: [{ cookieSessao: [] }] },
@@ -165,6 +165,9 @@ export const documentoOpenApi = {
     "/api/v1/admin/categories": {
       post: { description: "Cria categoria administrativa.", responses: { "201": { description: "Categoria criada" } }, security: [{ cookieSessao: [] }] },
     },
+    "/api/v1/admin/sellers": {
+      get: { description: "Lista vendedores para análise administrativa, com filtro opcional por situação de aprovação.", responses: { "200": { description: "Fila de vendedores" }, "403": { description: "Acesso administrativo obrigatório" } }, security: [{ cookieSessao: [] }] },
+    },
     "/api/v1/admin/sellers/{id}/approval": {
       post: { description: "Aprova ou rejeita vendedor e registra auditoria.", responses: { "204": { description: "Aprovação atualizada" } }, security: [{ cookieSessao: [] }] },
     },
@@ -173,6 +176,9 @@ export const documentoOpenApi = {
     },
     "/api/v1/admin/reviews/{id}": {
       patch: { description: "Publica, oculta ou rejeita uma avaliação e registra auditoria. Permitida apenas a administração e suporte.", responses: { "204": { description: "Avaliação moderada" }, "404": { description: "Avaliação inexistente" } }, security: [{ cookieSessao: [] }] },
+    },
+    "/api/v1/admin/reviews": {
+      get: { description: "Lista avaliações por situação para moderação administrativa ou de suporte.", responses: { "200": { description: "Fila de avaliações" }, "403": { description: "Acesso administrativo ou suporte obrigatório" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/files/{id}": {
       get: { description: "Redireciona imagem apenas quando vinculada a produto ativo de vendedor aprovado. Imagens privadas, documentos e avatares exigem posse ou papel administrativo e não revelam sua existência a visitantes.", responses: { "302": { description: "URL temporária" }, "404": { description: "Arquivo inexistente, não publicável ou sem acesso" } } },

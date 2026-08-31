@@ -41,6 +41,9 @@ export type CheckoutResult = {
     status: string;
     totalCents: number;
   };
+  payment: {
+    integrationPending: boolean;
+  };
 };
 
 function requestFingerprint(input: Omit<CheckoutInput, "userId">): string {
@@ -123,7 +126,8 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
   if (shippingCents === undefined || config.payments.commissionBasisPoints === undefined) {
     throw new AppError(503, "CHECKOUT_UNAVAILABLE");
   }
-  if (config.payments.provider !== "mercado_pago" && config.payments.provider !== "stripe") {
+  const paymentProviderConfigured = config.payments.provider === "mercado_pago" || config.payments.provider === "stripe";
+  if (!paymentProviderConfigured && config.nodeEnv !== "development") {
     throw new AppError(503, "PAYMENT_CONFIGURATION_UNAVAILABLE");
   }
   const fingerprint = requestFingerprint({
@@ -262,7 +266,7 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
     await client.query("UPDATE carts SET status = 'CHECKED_OUT', updated_at = now() WHERE id = $1", [cartId]);
     await client.query(
       `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
-       VALUES ($1, 'ORDER_CREATED', 'ORDER', $2, jsonb_build_object('orderNumber', $3))`,
+       VALUES ($1, 'ORDER_CREATED', 'ORDER', $2, jsonb_build_object('orderNumber', $3::text))`,
       [input.userId, orderId, orderNumber],
     );
     await enqueueDomainEvent(client, {
@@ -272,13 +276,15 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
       idempotencyKey: input.idempotencyKey,
       payload: { buyerId: input.userId, orderId, sellerId, totalCents },
     });
-    await enqueueDomainEvent(client, {
-      aggregateId: orderId,
-      aggregateType: "ORDER",
-      eventType: "PaymentRequested",
-      idempotencyKey: input.idempotencyKey,
-      payload: { orderId, paymentMethod: input.paymentMethod, totalCents },
-    });
+    if (paymentProviderConfigured) {
+      await enqueueDomainEvent(client, {
+        aggregateId: orderId,
+        aggregateType: "ORDER",
+        eventType: "PaymentRequested",
+        idempotencyKey: input.idempotencyKey,
+        payload: { orderId, paymentMethod: input.paymentMethod, totalCents },
+      });
+    }
     await enqueueDomainEvent(client, {
       aggregateId: orderId,
       aggregateType: "ORDER",
@@ -288,6 +294,7 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
     });
     const result: CheckoutResult = {
       order: { id: orderId, number: orderNumber, paymentStatus: "PENDING", status: "PENDING_PAYMENT", totalCents },
+      payment: { integrationPending: !paymentProviderConfigured },
     };
     await client.query(
       `INSERT INTO idempotency_records(user_id, operation, idempotency_key, request_hash, response_status, response_body)
