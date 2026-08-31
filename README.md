@@ -66,7 +66,9 @@ O cliente web é uma SPA React 19 compilada pelo Vite e entregue pelo Express em
 
 `framer-motion` controla transições de rota, modal de autenticação, cartões, listas, galeria e menus com springs amortecidas. O CSS preserva os tokens visuais da EliteHub e `prefers-reduced-motion` reduz movimento decorativo. A animação é limitada a propriedades compostas pelo navegador (`transform` e `opacity`) e os itens mantêm chaves estáveis para evitar desmontagens e reflow visual desnecessário.
 
-As rotas React implementadas são catálogo, produto, loja pública, carrinho, checkout, favoritos, notificações, pedidos, conta, onboarding de vendedor e ajuda. Carrinho, checkout, conta, vendedor e administração são carregados sob demanda por fronteira de rota, com fallback acessível. O contexto aguarda a verificação da sessão HttpOnly antes de abrir o gate de autenticação; assim, uma sessão válida em acesso direto a uma rota privada não recebe um falso pedido de login. Endpoints administrativos e de gestão de produto continuam protegidos no backend; uma tela não é criada sem um fluxo de negócio autorizado e persistente.
+`web/src/Aplicacao.tsx` é somente a composição de `BrowserRouter`, provedor de mercado e roteador. Catálogo, produto, loja pública, carrinho, checkout, favoritos, notificações, pedidos, conta, vendedor, administração e ajuda são carregados sob demanda por fronteira de rota, com fallback acessível. O contexto aguarda a verificação da sessão HttpOnly antes de abrir o gate de autenticação; assim, uma sessão válida em acesso direto a uma rota privada não recebe um falso pedido de login. Endpoints administrativos e de gestão de produto continuam protegidos no backend; uma tela não é criada sem um fluxo de negócio autorizado e persistente.
+
+Os ícones usam um componente único em `web/src/shared/icone.tsx`. Eles recebem microanimações de interação por `transform` — sino, carrinho, coração, localização, menu, usuário, busca, seta e compartilhamento — e preservam foco por teclado. Em `prefers-reduced-motion: reduce`, todas essas animações decorativas são desativadas.
 
 ## Pré-requisitos
 
