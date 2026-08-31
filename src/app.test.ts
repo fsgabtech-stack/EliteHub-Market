@@ -34,12 +34,50 @@ test("não redireciona rotas de API inexistentes para a interface", async () => 
 
 test("entrega a vitrine pública sem parede de autenticação", async () => {
   await withApplication(async (origin) => {
-    const response = await fetch(`${origin}/static/elitehub.html`);
-    assert.equal(response.status, 200);
-    const page = await response.text();
+    const response = await fetch(`${origin}/`, { redirect: "manual" });
+    assert.ok(response.status === 200 || response.status === 302);
+    if (response.status === 200) {
+      const page = await response.text();
+      assert.match(page, /id="root"/);
+      return;
+    }
+    assert.equal(response.headers.get("location"), "/static/elitehub.html");
+    const legacy = await fetch(`${origin}/static/elitehub.html`);
+    const page = await legacy.text();
     assert.match(page, /id="catalog-page"/);
-    assert.match(page, /id="auth-dialog"/);
-    assert.doesNotMatch(page, /id="auth-view"/);
+    assert.match(page, /avatar-login-elitehub\.png/);
+  });
+});
+
+test("serve os recursos globais de motion", async () => {
+  await withApplication(async (origin) => {
+    const [style, script] = await Promise.all([
+      fetch(`${origin}/static/motion.css`),
+      fetch(`${origin}/static/motion.js`),
+    ]);
+    assert.equal(style.status, 200);
+    assert.equal(script.status, 200);
+    assert.match(await style.text(), /prefers-reduced-motion/);
+    assert.match(await script.text(), /EliteHubMotion/);
+  });
+});
+
+test("serve o avatar de autenticação fornecido como imagem PNG", async () => {
+  await withApplication(async (origin) => {
+    const response = await fetch(`${origin}/static/assets/avatar-login-elitehub.png`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") || "", /image\/png/);
+    assert.ok((await response.arrayBuffer()).byteLength > 1_000_000);
+  });
+});
+
+test("informa a disponibilidade real dos provedores de autenticação", async () => {
+  await withApplication(async (origin) => {
+    const response = await fetch(`${origin}/api/v1/auth/providers`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as { google: unknown; microsoft: unknown };
+    assert.equal(typeof body.google, "boolean");
+    assert.equal(typeof body.microsoft, "boolean");
   });
 });
 
@@ -47,9 +85,13 @@ test("permite consultar o catálogo publicamente quando a persistência está di
   await withApplication(async (origin) => {
     const response = await fetch(`${origin}/api/v1/catalog/products?limit=1`);
     assert.equal(response.status, 200);
-    const body = await response.json() as { items: unknown[]; page: { total: number } };
+    const body = await response.json() as { items: Array<{ availability?: unknown; stockQuantity?: unknown }>; page: { total: number } };
     assert.ok(Array.isArray(body.items));
     assert.equal(typeof body.page.total, "number");
+    if (body.items[0]) {
+      assert.equal(typeof body.items[0].availability, "string");
+      assert.equal(body.items[0].stockQuantity, undefined);
+    }
   });
 });
 
@@ -82,5 +124,16 @@ test("mantém carrinho e checkout protegidos para visitante anônimo", async () 
     assert.equal(checkout.status, 401);
     const body = await checkout.json() as { error: { code: string } };
     assert.equal(body.error.code, "SESSION_EXPIRED");
+
+    const review = await fetch(`${origin}/api/v1/products/00000000-0000-4000-8000-000000000001/reviews`, {
+      body: JSON.stringify({ body: "Avaliação válida de uma compra entregue.", rating: 5, title: "Muito bom" }),
+      headers: {
+        "content-type": "application/json",
+        cookie: setCookie.split(";")[0],
+        "x-csrf-token": decodeURIComponent(csrfValue),
+      },
+      method: "POST",
+    });
+    assert.equal(review.status, 401);
   });
 });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { query } from "../db/pool.js";
 import { AppError, asyncRoute, invalidRequest } from "../http/errors.js";
 import { readCachedJson, writeCachedJson } from "../infrastructure/cache/redis.js";
+import { availabilityFromStock } from "../modules/catalog/availability.js";
 
 const listQuerySchema = z.object({
   category: z.string().uuid().optional(),
@@ -27,6 +28,8 @@ type ProductRow = {
   description: string;
   image_url: string | null;
   price_cents: number;
+  review_average: number;
+  review_count: number;
   stock_quantity: number;
   category_id: string | null;
   category_name: string | null;
@@ -37,12 +40,13 @@ type ProductRow = {
 
 function shapeProduct(row: ProductRow) {
   return {
+    availability: availabilityFromStock(row.stock_quantity),
     category: row.category_id && row.category_name ? { id: row.category_id, name: row.category_name } : null,
     id: row.id,
     imageUrl: row.image_url,
     priceCents: row.price_cents,
+    rating: row.review_count > 0 ? { average: row.review_average, count: row.review_count } : null,
     seller: { id: row.seller_id, name: row.store_name ?? row.seller_name },
-    stockQuantity: row.stock_quantity,
     title: row.title,
   };
 }
@@ -52,7 +56,19 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
     `${prefix}/categories`,
     asyncRoute(async (_request, response) => {
       const result = await query<{ id: string; name: string; slug: string }>(
-        "SELECT id, name, slug FROM categories ORDER BY name ASC",
+        `SELECT categories.id, categories.name, categories.slug
+           FROM categories
+          WHERE EXISTS (
+            SELECT 1
+              FROM products
+              JOIN users ON users.id = products.seller_id AND users.deleted_at IS NULL
+              JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+                AND seller_profiles.approval_status = 'APPROVED'
+             WHERE products.category_id = categories.id
+               AND products.status = 'ACTIVE'
+               AND products.deleted_at IS NULL
+          )
+          ORDER BY categories.name ASC`,
       );
       response.json({ items: result.rows });
     }),
@@ -85,7 +101,7 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
         return;
       }
       const values: unknown[] = [];
-      const clauses = ["products.status = 'ACTIVE'", "products.deleted_at IS NULL"];
+      const clauses = ["products.status = 'ACTIVE'", "products.deleted_at IS NULL", "users.deleted_at IS NULL", "seller_profiles.approval_status = 'APPROVED'"];
       let queryTermIndex: number | undefined;
       if (input.category) {
         values.push(input.category);
@@ -116,7 +132,11 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
             ? `CASE WHEN products.title ILIKE $${queryTermIndex} ESCAPE '\\' THEN 0 ELSE 1 END, products.created_at DESC`
             : "products.created_at DESC";
       const totals = await query<{ total: number }>(
-        `SELECT COUNT(*)::integer AS total FROM products WHERE ${clauses.join(" AND ")}`,
+        `SELECT COUNT(*)::integer AS total
+           FROM products
+           JOIN users ON users.id = products.seller_id
+           JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+          WHERE ${clauses.join(" AND ")}`,
         values,
       );
       const total = totals.rows[0]?.total ?? 0;
@@ -126,10 +146,11 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
                 COALESCE('/api/v1/files/' || primary_image.asset_id::text, products.image_url) AS image_url,
                 products.price_cents, products.stock_quantity, products.category_id,
                 categories.name AS category_name, users.full_name AS seller_name, products.seller_id,
-                seller_profiles.store_name
+                seller_profiles.store_name, COALESCE(review_summary.review_average, 0) AS review_average,
+                review_summary.review_count
            FROM products
            JOIN users ON users.id = products.seller_id
-           LEFT JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+           JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
           LEFT JOIN categories ON categories.id = products.category_id
           LEFT JOIN LATERAL (
             SELECT product_images.asset_id
@@ -139,6 +160,11 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
              ORDER BY product_images.sort_order ASC
              LIMIT 1
           ) AS primary_image ON true
+          LEFT JOIN LATERAL (
+            SELECT AVG(product_reviews.rating)::float8 AS review_average, COUNT(*)::integer AS review_count
+              FROM product_reviews
+             WHERE product_reviews.product_id = products.id AND product_reviews.status = 'PUBLISHED'
+          ) AS review_summary ON true
          WHERE ${clauses.join(" AND ")}
           ORDER BY ${orderBy}
          LIMIT $${values.length - 1} OFFSET $${values.length}`,
@@ -162,9 +188,14 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
       }
       const pattern = `%${parsed.data.q.replace(/[\\%_]/g, "\\$&")}%`;
       const products = await query<{ id: string; title: string }>(
-        `SELECT id, title FROM products
-          WHERE status = 'ACTIVE' AND deleted_at IS NULL AND title ILIKE $1 ESCAPE '\\'
-          ORDER BY created_at DESC
+        `SELECT products.id, products.title
+           FROM products
+           JOIN users ON users.id = products.seller_id AND users.deleted_at IS NULL
+           JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+             AND seller_profiles.approval_status = 'APPROVED'
+          WHERE products.status = 'ACTIVE' AND products.deleted_at IS NULL
+            AND products.title ILIKE $1 ESCAPE '\\'
+          ORDER BY products.created_at DESC
           LIMIT 8`,
         [pattern],
       );
@@ -184,10 +215,12 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
                 COALESCE('/api/v1/files/' || primary_image.asset_id::text, products.image_url) AS image_url,
                 products.price_cents, products.stock_quantity, products.category_id,
                 categories.name AS category_name, users.full_name AS seller_name, products.seller_id,
-                seller_profiles.store_name
+                seller_profiles.store_name, COALESCE(review_summary.review_average, 0) AS review_average,
+                review_summary.review_count
            FROM products
-           JOIN users ON users.id = products.seller_id
-           LEFT JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+           JOIN users ON users.id = products.seller_id AND users.deleted_at IS NULL
+           JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+             AND seller_profiles.approval_status = 'APPROVED'
           LEFT JOIN categories ON categories.id = products.category_id
           LEFT JOIN LATERAL (
             SELECT product_images.asset_id
@@ -197,6 +230,11 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
              ORDER BY product_images.sort_order ASC
              LIMIT 1
           ) AS primary_image ON true
+          LEFT JOIN LATERAL (
+            SELECT AVG(product_reviews.rating)::float8 AS review_average, COUNT(*)::integer AS review_count
+              FROM product_reviews
+             WHERE product_reviews.product_id = products.id AND product_reviews.status = 'PUBLISHED'
+          ) AS review_summary ON true
           WHERE products.id = $1 AND products.status = 'ACTIVE' AND products.deleted_at IS NULL`,
         [id.data],
       );
@@ -230,11 +268,11 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
           description: product.description,
           images: images.rows.map((image) => ({ url: `/api/v1/files/${image.asset_id}` })),
           variants: variants.rows.map((variant) => ({
+            availability: availabilityFromStock(variant.stock_quantity),
             attributes: variant.attributes,
             id: variant.id,
             priceCents: variant.price_cents,
             sku: variant.sku,
-            stockQuantity: variant.stock_quantity,
           })),
         },
       });

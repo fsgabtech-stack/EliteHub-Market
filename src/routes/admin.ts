@@ -6,6 +6,7 @@ import { requireAnyRole, requireAuthenticatedUser } from "../http/authorization.
 import { AppError, asyncRoute, invalidRequest } from "../http/errors.js";
 import { csrfProtection } from "../http/security.js";
 import { enqueueDomainEvent } from "../modules/events/outbox.js";
+import { invalidatePublicCatalogCache } from "../modules/catalog/cache.js";
 
 const categorySchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -57,6 +58,7 @@ export function registerAdminRoutes(router: Router): void {
       if (!createdCategory) {
         throw new AppError(503, "BACKEND_UNAVAILABLE");
       }
+      await invalidatePublicCatalogCache();
       response.status(201).json({ id: createdCategory.id });
     }),
   );
@@ -86,6 +88,7 @@ export function registerAdminRoutes(router: Router): void {
           [user.id, sellerId.data, status.data.status],
         );
       });
+      await invalidatePublicCatalogCache();
       response.status(204).send();
     }),
   );

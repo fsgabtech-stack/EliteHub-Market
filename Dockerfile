@@ -4,8 +4,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM dependencias AS compilacao
-COPY tsconfig.json eslint.config.js ./
+COPY tsconfig.json eslint.config.js vite.config.ts ./
 COPY src ./src
+COPY web ./web
+COPY static ./static
 RUN npm run build
 
 FROM node:24-alpine AS execucao

@@ -55,7 +55,7 @@ async function sendPasswordResetEmail(event: OutboxEvent): Promise<void> {
   if (!config.smtpUrl || !config.smtpFrom || !recipientEmail || !resetTokenEnvelope) {
     throw new Error("Configuração SMTP ou carga de recuperação ausente");
   }
-  const resetUrl = new URL("/static/elitehub.html", config.appOrigin);
+  const resetUrl = new URL("/", config.appOrigin);
   resetUrl.searchParams.set("reset_token", openServerValue(resetTokenEnvelope));
   const transport = nodemailer.createTransport(config.smtpUrl);
   await transport.sendMail({
@@ -127,9 +127,11 @@ function notificationContent(template: string): { text: string; title: string } 
     : template === "PAYMENT_APPROVED"
       ? "Seu pagamento foi confirmado. O vendedor será notificado para iniciar o processamento."
       : template === "PAYMENT_FAILED"
-        ? "O pagamento do seu pedido não foi aprovado. O estoque reservado foi liberado."
-        : template === "PAYMENT_REFUNDED"
-          ? "O reembolso do seu pedido foi confirmado pelo provedor de pagamento."
+      ? "O pagamento do seu pedido não foi aprovado. O estoque reservado foi liberado."
+      : template === "PAYMENT_REFUNDED"
+        ? "O reembolso do seu pedido foi confirmado pelo provedor de pagamento."
+        : template === "REVIEW_PUBLISHED"
+          ? "Sua avaliação foi publicada na página do produto."
           : "O status do seu pedido foi atualizado. Acesse sua conta para consultar os detalhes.";
   return { text, title: "Atualização da EliteHub Connect" };
 }

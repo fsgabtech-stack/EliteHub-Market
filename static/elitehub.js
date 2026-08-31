@@ -48,6 +48,10 @@ const accountAvatar = document.querySelector("#account-avatar");
 const searchInput = document.querySelector("#product-search");
 const searchSuggestions = document.querySelector("#search-suggestions");
 const googleSection = document.querySelector("#google-section");
+const welcomePanel = document.querySelector("#welcome-panel");
+const googleLoginButton = document.querySelector("#google-login");
+const microsoftLoginButton = document.querySelector("#microsoft-login");
+const motion = window.EliteHubMotion;
 let suggestionPosition = -1;
 
 function svg(icon) {
@@ -88,9 +92,13 @@ function publicMessage(error) {
 }
 
 function setStatus(target, message, kind = "error") {
-  target.hidden = !message;
+  if (!message) {
+    void motion.hide(target, "panel");
+    return;
+  }
   target.dataset.kind = kind;
-  target.textContent = message || "";
+  target.textContent = message;
+  void motion.show(target, "panel");
 }
 
 function csrfToken() {
@@ -120,6 +128,12 @@ async function request(url, options = {}) {
 
 function formatCurrency(cents) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
+}
+
+function formatRating(rating) {
+  if (!rating?.count) return "";
+  const average = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(rating.average);
+  return `★ ${average} (${rating.count} ${rating.count === 1 ? "avaliação" : "avaliações"})`;
 }
 
 function formatDate(value) {
@@ -158,12 +172,14 @@ function clearPendingAction() {
   try { sessionStorage.removeItem("elitehub-pending-action"); } catch { }
 }
 
-function showAuth(message, action = null, mode = "login") {
+function showAuth(message, action = null, mode = "welcome") {
   if (action) savePendingAction(action);
   switchAuthMode(mode, true);
-  setStatus(authStatus, message, "error");
-  if (!authDialog.open) authDialog.showModal();
-  document.querySelector("#login-email")?.focus({ preventScroll: true });
+  setStatus(authStatus, message, "info");
+  if (!authDialog.open) void motion.openDialog(authDialog);
+  document.body.classList.add("auth-modal-open");
+  const focusTarget = { welcome: "#auth-get-started", login: "#login-email", recovery: "#recovery-email", register: "#register-full-name", reset: "#reset-password" }[mode] || "#auth-get-started";
+  document.querySelector(focusTarget)?.focus({ preventScroll: true });
 }
 
 function requireProtectedRoute(route, message) {
@@ -185,6 +201,7 @@ async function resumePendingAction() {
     }
     if (action.kind === "cart") {
       await addCartItem(action.productId, action.quantity, action.variantId);
+      void motion.pulse(document.querySelector("#cart-button"), 1.1);
       clearPendingAction();
       setStatus(marketStatus, "Produto adicionado ao carrinho.", "success");
       navigate(action.nextRoute || "#carrinho");
@@ -203,22 +220,28 @@ async function resumePendingAction() {
 }
 
 const modes = {
-  login: { subtitle: "Use seu e-mail e senha para continuar.", title: "Entre na sua conta", form: "#login-form", prompt: "Ainda não tenho uma conta", switchLabel: "Criar conta", switchMode: "register", google: true },
-  register: { subtitle: "Crie seu acesso para salvar produtos e comprar com segurança.", title: "Crie sua conta", form: "#register-form", prompt: "Já tenho uma conta", switchLabel: "Entrar", switchMode: "login", google: true },
-  recovery: { subtitle: "Informe seu e-mail para solicitar a recuperação.", title: "Recuperar senha", form: "#recovery-form", prompt: "Lembrou sua senha?", switchLabel: "Voltar para entrar", switchMode: "login", google: false },
-  reset: { subtitle: "Escolha uma nova senha forte para sua conta.", title: "Defina uma nova senha", form: "#reset-form", prompt: "Já definiu sua senha?", switchLabel: "Voltar para entrar", switchMode: "login", google: false },
+  welcome: { subtitle: "Explore uma experiência de compra criada para ser simples e segura.", title: "Bem-vindo à EliteHub", form: null, prompt: "Já possui uma conta?", switchLabel: "Entrar", switchMode: "login", providers: true },
+  login: { subtitle: "Entre para acessar sua conta e continuar com segurança.", title: "Entrar", form: "#login-form", prompt: "Ainda não possui uma conta?", switchLabel: "Criar conta", switchMode: "register", providers: true },
+  register: { subtitle: "Crie sua conta para começar a usar a EliteHub.", title: "Criar conta", form: "#register-form", prompt: "Já possui uma conta?", switchLabel: "Entrar", switchMode: "login", providers: true },
+  recovery: { subtitle: "Informe seu e-mail para recuperar o acesso à EliteHub.", title: "Recuperar senha", form: "#recovery-form", prompt: "Lembrou sua senha?", switchLabel: "Voltar para entrar", switchMode: "login", providers: false },
+  reset: { subtitle: "Escolha uma nova senha forte para sua conta.", title: "Defina uma nova senha", form: "#reset-form", prompt: "Já definiu sua senha?", switchLabel: "Voltar para entrar", switchMode: "login", providers: false },
 };
 
 function switchAuthMode(mode, preserveStatus = false) {
-  const current = modes[mode] || modes.login;
-  document.querySelectorAll(".form-stack").forEach((form) => { form.hidden = `#${form.id}` !== current.form; });
-  document.querySelector("#auth-title").textContent = current.title;
-  document.querySelector("#auth-subtitle").textContent = current.subtitle;
-  document.querySelector("#auth-switch-prompt").textContent = current.prompt;
-  const switchButton = document.querySelector("#auth-switch");
-  switchButton.textContent = current.switchLabel;
-  switchButton.dataset.authMode = current.switchMode;
-  googleSection.hidden = !current.google || googleSection.dataset.available !== "true";
+  const selectedMode = modes[mode] ? mode : "welcome";
+  const current = modes[selectedMode];
+  motion.layout(document.querySelector("#auth-card"), () => {
+    document.querySelectorAll(".form-stack").forEach((form) => { form.hidden = `#${form.id}` !== current.form; });
+    welcomePanel.hidden = selectedMode !== "welcome";
+    document.querySelector("#auth-title").textContent = current.title;
+    document.querySelector("#auth-subtitle").textContent = current.subtitle;
+    document.querySelector("#auth-card").dataset.authMode = selectedMode;
+    document.querySelector("#auth-switch-prompt").textContent = current.prompt;
+    const switchButton = document.querySelector("#auth-switch");
+    switchButton.textContent = current.switchLabel;
+    switchButton.dataset.authMode = current.switchMode;
+    googleSection.hidden = !current.providers;
+  });
   if (!preserveStatus) setStatus(authStatus, "");
 }
 
@@ -228,11 +251,17 @@ function clearErrors(form) {
 
 function showInputError(id, message) {
   const target = document.querySelector(`#${id}`);
-  if (target) target.textContent = message;
+  if (target) {
+    target.textContent = message;
+    void motion.enter(target, "panel");
+  }
 }
 
 function setSubmitState(buttonElement, loading, label) {
-  if (!buttonElement.dataset.defaultLabel) buttonElement.dataset.defaultLabel = buttonElement.textContent.trim();
+  if (!buttonElement.dataset.defaultLabel) {
+    buttonElement.dataset.defaultLabel = buttonElement.textContent.trim();
+    buttonElement.style.minWidth = `${Math.ceil(buttonElement.getBoundingClientRect().width)}px`;
+  }
   buttonElement.disabled = loading;
   buttonElement.textContent = loading ? label : buttonElement.dataset.defaultLabel;
 }
@@ -263,7 +292,7 @@ function renderAccountMenu() {
 }
 
 function closeAccountMenu() {
-  accountMenu.hidden = true;
+  void motion.hide(accountMenu, "menu");
   accountButton.setAttribute("aria-expanded", "false");
 }
 
@@ -275,8 +304,18 @@ function syncThemeButtonLabels() {
 async function loadProviders() {
   try {
     const providers = await request(endpoints.providers);
-    googleSection.dataset.available = String(providers.google);
-  } catch { googleSection.dataset.available = "false"; }
+    setProviderAvailability(googleLoginButton, providers.google === true, "O login com Google ainda não está configurado.");
+    setProviderAvailability(microsoftLoginButton, providers.microsoft === true, "O login com Microsoft ainda não está configurado.");
+  } catch {
+    setProviderAvailability(googleLoginButton, false, "Não foi possível verificar o login com Google.");
+    setProviderAvailability(microsoftLoginButton, false, "Não foi possível verificar o login com Microsoft.");
+  }
+}
+
+function setProviderAvailability(buttonElement, available, unavailableMessage) {
+  buttonElement.disabled = !available;
+  buttonElement.setAttribute("aria-disabled", String(!available));
+  buttonElement.title = available ? "" : unavailableMessage;
 }
 
 async function loadFavoriteIds() {
@@ -317,17 +356,29 @@ function imageFor(url, alt, className = "") {
   return image;
 }
 
+function availabilityLabel(availability) {
+  if (availability === "OUT_OF_STOCK") return "Indisponível";
+  if (availability === "LOW_STOCK") return "Últimas unidades";
+  return "Disponível";
+}
+
 function renderProductCard(product) {
   const card = node("article", { className: "product-card" });
+  card.dataset.productId = product.id;
   const favorite = node("button", { className: "icon-button card-favorite", type: "button", attrs: { "aria-label": "Salvar nos favoritos", "aria-pressed": String(state.favoriteIds.has(product.id)), title: "Salvar nos favoritos" }, onClick: (event) => { event.stopPropagation(); void toggleFavorite(product.id); } }, [svg("coracao")]);
   const open = node("button", { className: "product-card__link", type: "button", attrs: { "aria-label": `Ver detalhes de ${product.title}` }, onClick: () => navigate(`#produto/${product.id}`) });
   const picture = node("div", { className: "product-card__image", text: product.imageUrl ? "" : "Imagem indisponível" });
   if (product.imageUrl) picture.append(imageFor(product.imageUrl, product.title));
   const content = node("div", { className: "product-card__content" });
-  content.append(node("h3", { className: "product-card__title", text: product.title }), node("p", { className: "product-card__price", text: formatCurrency(product.priceCents) }), node("p", { className: "product-card__meta", text: product.category?.name || "Sem categoria" }));
+  content.append(
+    node("h3", { className: "product-card__title", text: product.title }),
+    node("p", { className: "product-card__price", text: formatCurrency(product.priceCents) }),
+    node("p", { className: "product-card__meta", text: product.category?.name || "Sem categoria" }),
+    ...(product.rating ? [node("p", { className: "product-card__rating", text: formatRating(product.rating), attrs: { "aria-label": `Avaliação média: ${formatRating(product.rating)}` } })] : []),
+  );
   open.append(picture, content);
   const seller = node("a", { className: "product-card__seller", href: `#loja/${product.seller.id}`, text: product.seller.name });
-  const stock = node("p", { className: `stock ${product.stockQuantity > 0 ? "stock--available" : "stock--unavailable"}`, text: product.stockQuantity > 0 ? "Em estoque" : "Indisponível" });
+  const stock = node("p", { className: `stock ${product.availability === "OUT_OF_STOCK" ? "stock--unavailable" : "stock--available"}`, text: availabilityLabel(product.availability) });
   card.append(favorite, open, seller, stock);
   return card;
 }
@@ -339,6 +390,7 @@ function renderProducts(items) {
     return;
   }
   productList.replaceChildren(...items.map(renderProductCard));
+  motion.stagger(productList.querySelectorAll(".product-card"));
 }
 
 function renderPagination(page) {
@@ -384,6 +436,7 @@ async function loadCategories() {
       item.setAttribute("aria-pressed", String(state.activeCategory === category.id));
       categoryList.append(item);
     });
+    motion.stagger(categoryList.querySelectorAll(".category-chip"), "list");
   } catch { categoryList.replaceChildren(); }
 }
 
@@ -398,14 +451,15 @@ async function loadSuggestions() {
       return node("li", {}, [itemButton]);
     }));
     suggestionPosition = -1;
-    searchSuggestions.hidden = result.items.length === 0;
+    if (result.items.length) void motion.show(searchSuggestions, "menu");
+    else void motion.hide(searchSuggestions, "menu");
     searchInput.setAttribute("aria-expanded", String(result.items.length > 0));
   } catch { hideSuggestions(); }
 }
 
 function hideSuggestions() {
   suggestionPosition = -1;
-  searchSuggestions.hidden = true;
+  void motion.hide(searchSuggestions, "menu");
   searchInput.setAttribute("aria-expanded", "false");
 }
 
@@ -414,19 +468,21 @@ function showCatalog() {
   detailPage.hidden = true;
   detailPage.replaceChildren();
   document.title = "EliteHub Connect | Marketplace";
+  void motion.enter(catalogPage, "page");
 }
 
 function showDetail() {
   catalogPage.hidden = true;
   detailPage.hidden = false;
   detailPage.replaceChildren();
+  void motion.enter(detailPage, "page");
 }
 
 function selectedProductValues(product) {
   const variant = product.variants.find((item) => item.id === state.selectedVariantId) || null;
   return {
+    availability: variant?.availability ?? product.availability,
     priceCents: variant?.priceCents ?? product.priceCents,
-    stockQuantity: variant?.stockQuantity ?? product.stockQuantity,
     variantId: variant?.id,
   };
 }
@@ -444,7 +500,7 @@ async function renderProduct(productId) {
     const gallery = node("div", { className: "product-gallery" });
     const mainImage = node("div", { className: "product-gallery__main" });
     const images = [...new Set([product.imageUrl, ...product.images.map((image) => image.url)].filter(Boolean))];
-    const updateImage = (url) => { mainImage.replaceChildren(url ? imageFor(url, product.title) : node("span", { className: "product-gallery__fallback", text: "Imagem indisponível" })); };
+    const updateImage = (url) => { motion.replace(mainImage, url ? imageFor(url, product.title) : node("span", { className: "product-gallery__fallback", text: "Imagem indisponível" }), "image"); };
     updateImage(images[0]);
     gallery.append(mainImage);
     if (images.length > 1) {
@@ -459,18 +515,19 @@ async function renderProduct(productId) {
     const category = node("p", { className: "eyebrow", text: product.category?.name || "Produto" });
     const title = node("h1", { text: product.title });
     const price = node("p", { className: "product-info__price" });
+    const rating = product.rating ? node("p", { className: "rating-summary", text: formatRating(product.rating), attrs: { "aria-label": `Avaliação média: ${formatRating(product.rating)}` } }) : null;
     const stock = node("p", { className: "stock" });
     const refreshProductValues = () => {
       const values = selectedProductValues(product);
       price.textContent = formatCurrency(values.priceCents);
-      stock.className = `stock ${values.stockQuantity > 0 ? "stock--available" : "stock--unavailable"}`;
-      stock.textContent = values.stockQuantity > 0 ? "Em estoque" : "Indisponível";
-      add.disabled = values.stockQuantity <= 0;
-      buy.disabled = values.stockQuantity <= 0;
+      stock.className = `stock ${values.availability === "OUT_OF_STOCK" ? "stock--unavailable" : "stock--available"}`;
+      stock.textContent = availabilityLabel(values.availability);
+      add.disabled = values.availability === "OUT_OF_STOCK";
+      buy.disabled = values.availability === "OUT_OF_STOCK";
     };
     const seller = node("a", { className: "product-info__seller", href: `#loja/${product.seller.id}`, text: `Vendido por ${product.seller.name}` });
     const description = node("p", { className: "product-info__description", text: product.description });
-    info.append(category, title, price, stock, seller, description);
+    info.append(category, title, price, ...(rating ? [rating] : []), stock, seller, description);
     if (product.variants.length) {
       const variantWrap = node("div");
       variantWrap.append(node("p", { className: "eyebrow", text: "Variações" }));
@@ -501,10 +558,28 @@ async function renderProduct(productId) {
     layout.append(gallery, info);
     page.append(layout);
     detailPage.replaceChildren(page);
+    if (product.rating?.count) void appendReviews(page, product);
     if (product.category?.id) void appendRelatedProducts(page, product);
   } catch (error) {
     detailPage.replaceChildren(node("div", { className: "empty-state" }, [node("h2", { text: "Produto indisponível" }), node("p", { text: publicMessage(error) }), button("Voltar ao catálogo", () => navigate("#ofertas"))]));
   }
+}
+
+async function appendReviews(page, product) {
+  try {
+    const result = await request(`/api/v1/products/${product.id}/reviews?limit=5`);
+    if (!result.items.length) return;
+    const section = node("section", { className: "review-section", attrs: { "aria-labelledby": "reviews-title" } });
+    section.append(node("p", { className: "eyebrow", text: formatRating(product.rating) }), node("h2", { attrs: { id: "reviews-title" }, text: "Avaliações de compradores" }));
+    const list = node("div", { className: "review-list" });
+    result.items.forEach((review) => {
+      const meta = node("p", { className: "review-card__meta", text: `${review.authorName} · ${formatDate(review.createdAt)} · Compra verificada` });
+      list.append(node("article", { className: "review-card" }, [node("p", { className: "review-card__rating", text: `★ ${review.rating}/5` }), node("h3", { text: review.title }), node("p", { text: review.text }), meta]));
+    });
+    section.append(list);
+    page.append(section);
+    motion.stagger(list.querySelectorAll(".review-card"));
+  } catch { }
 }
 
 async function appendRelatedProducts(page, product) {
@@ -515,6 +590,7 @@ async function appendRelatedProducts(page, product) {
     const section = node("section", { className: "category-section" });
     section.append(node("p", { className: "eyebrow", text: "Mais desta categoria" }), node("h2", { text: "Produtos relacionados" }), node("div", { className: "product-grid" }, related.map(renderProductCard)));
     page.append(section);
+    motion.stagger(section.querySelectorAll(".product-card"));
   } catch { }
 }
 
@@ -544,6 +620,8 @@ async function toggleFavorite(productId) {
       state.favoriteIds.add(productId);
       setStatus(marketStatus, "Produto salvo nos favoritos.", "success");
     }
+    const favorite = [...document.querySelectorAll(".product-card")].find((card) => card.dataset.productId === productId)?.querySelector(".card-favorite");
+    if (favorite) void motion.pulse(favorite, 1.12);
     void renderRoute();
   } catch (error) { setStatus(marketStatus, publicMessage(error)); }
 }
@@ -561,6 +639,7 @@ async function requestCartIntent(productId, variantId, nextRoute) {
   }
   try {
     await addCartItem(productId, 1, variantId);
+    void motion.pulse(document.querySelector("#cart-button"), 1.1);
     setStatus(marketStatus, "Produto adicionado ao carrinho.", "success");
     navigate(nextRoute);
   } catch (error) { setStatus(marketStatus, publicMessage(error)); }
@@ -571,6 +650,7 @@ function privatePanel(title, description) {
   const panel = node("section", { className: "account-panel" });
   panel.append(button("Voltar ao catálogo", () => navigate("#ofertas"), "back-link"), node("h1", { text: title }), node("p", { text: description }));
   detailPage.replaceChildren(panel);
+  void motion.enter(panel, "page");
   return panel;
 }
 
@@ -589,13 +669,14 @@ async function renderCart() {
       const info = node("div");
       info.append(node("h2", { text: item.product.title }), node("p", { text: `Quantidade: ${item.quantity}` }), item.variant ? node("p", { text: `Variação: ${Object.values(item.variant.attributes).map(String).join(" · ")}` }) : null);
       const controls = node("div");
-      controls.append(node("p", { className: "cart-item__price", text: formatCurrency(item.unitPriceCents * item.quantity) }), button("Remover", async () => { try { await request(`${endpoints.cartItems}/${item.id}`, { method: "DELETE" }); await renderCart(); } catch (error) { setStatus(marketStatus, publicMessage(error)); } }, "text-button"));
+      controls.append(node("p", { className: "cart-item__price", text: formatCurrency(item.unitPriceCents * item.quantity) }), button("Remover", async () => { try { await request(`${endpoints.cartItems}/${item.id}`, { method: "DELETE" }); await motion.exit(row, "list"); await renderCart(); } catch (error) { setStatus(marketStatus, publicMessage(error)); } }, "text-button"));
       row.append(info, controls);
       list.append(row);
     });
     const summary = node("div", { className: "cart-summary" });
     summary.append(node("div", {}, [node("span", { text: "Subtotal" }), node("strong", { text: formatCurrency(cart.subtotalCents) })]), button("Continuar compra", () => navigate("#checkout"), "button button--primary"));
     panel.append(list, summary);
+    motion.stagger(list.children);
   } catch (error) { panel.append(node("div", { className: "empty-state", text: publicMessage(error) })); }
 }
 
@@ -687,7 +768,7 @@ async function renderFavorites() {
       panel.append(node("div", { className: "empty-state" }, [node("h2", { text: "Você ainda não salvou produtos" }), node("p", { text: "Use o ícone de coração em qualquer produto do catálogo." })]));
       return;
     }
-    panel.append(node("div", { className: "product-grid" }, result.items.map((item) => {
+    const grid = node("div", { className: "product-grid" }, result.items.map((item) => {
       const card = node("article", { className: "product-card" });
       const open = node("button", { className: "product-card__link", type: "button", onClick: () => navigate(`#produto/${item.id}`) });
       const image = node("div", { className: "product-card__image", text: item.imageUrl ? "" : "Imagem indisponível" });
@@ -695,7 +776,9 @@ async function renderFavorites() {
       open.append(image, node("div", { className: "product-card__content" }, [node("h2", { className: "product-card__title", text: item.title }), node("p", { className: "product-card__price", text: formatCurrency(item.priceCents) })]));
       card.append(open);
       return card;
-    })));
+    }));
+    panel.append(grid);
+    motion.stagger(grid.querySelectorAll(".product-card"));
   } catch (error) { panel.append(node("div", { className: "empty-state", text: publicMessage(error) })); }
 }
 
@@ -714,6 +797,7 @@ async function renderNotifications() {
       list.append(row);
     });
     panel.append(list);
+    motion.stagger(list.children);
   } catch (error) { panel.append(node("div", { className: "empty-state", text: publicMessage(error) })); }
 }
 
@@ -725,6 +809,7 @@ async function renderOrders() {
     const list = node("div", { className: "notification-list" });
     result.items.forEach((item) => list.append(node("article", { className: "notification-item" }, [node("div", {}, [node("h2", { text: `Pedido ${item.number}` }), node("p", { text: `${formatCurrency(item.totalCents)} · ${item.status}` })]), node("time", { text: formatDate(item.createdAt), attrs: { datetime: item.createdAt } })])));
     panel.append(list);
+    motion.stagger(list.children);
   } catch (error) { panel.append(node("div", { className: "empty-state", text: publicMessage(error) })); }
 }
 
@@ -741,16 +826,26 @@ async function renderSeller(sellerId) {
     document.title = `${seller.storeName} | EliteHub Connect`;
     const page = node("div");
     page.append(button("Voltar ao catálogo", () => navigate("#ofertas"), "back-link"));
-    const header = node("section", { className: "store-header" }, [node("p", { className: "eyebrow", text: "Loja verificada" }), node("h1", { text: seller.storeName }), node("p", { text: seller.description || "Esta loja não informou uma descrição pública." })]);
+    const header = node("section", { className: "store-header" }, [node("p", { className: "eyebrow", text: "Loja verificada" }), node("h1", { text: seller.storeName }), ...(seller.rating ? [node("p", { className: "store-header__rating", text: formatRating(seller.rating) })] : []), node("p", { text: seller.description || "Esta loja não informou uma descrição pública." })]);
     page.append(header, node("section", { className: "category-section" }, [node("p", { className: "eyebrow", text: `${seller.productCount} produtos ativos` }), node("h2", { text: "Produtos desta loja" })]));
     const products = await request(`${endpoints.products}?seller=${seller.id}&limit=12`);
     page.append(node("div", { className: "product-grid" }, products.items.map(renderProductCard)));
     detailPage.replaceChildren(page);
+    motion.stagger(detailPage.querySelectorAll(".product-card"));
   } catch (error) { detailPage.replaceChildren(node("div", { className: "empty-state" }, [node("h2", { text: "Loja indisponível" }), node("p", { text: publicMessage(error) }), button("Voltar ao catálogo", () => navigate("#ofertas"))])); }
+}
+
+function syncActiveNavigation(route) {
+  document.querySelectorAll("#market-nav a[href^='#']").forEach((link) => {
+    const target = link.getAttribute("href");
+    const active = target === "#inicio" ? route === "#inicio" : route === target;
+    link.dataset.active = String(active);
+  });
 }
 
 async function renderRoute() {
   const route = currentRoute();
+  syncActiveNavigation(route);
   closeAccountMenu();
   document.querySelector("#market-nav").classList.remove("is-open");
   if (route.startsWith("#produto/")) return renderProduct(route.slice("#produto/".length));
@@ -791,8 +886,11 @@ document.querySelectorAll("[data-password-toggle]").forEach((element) => element
 
 document.querySelector("#auth-switch").addEventListener("click", (event) => switchAuthMode(event.currentTarget.dataset.authMode));
 document.querySelectorAll("[data-auth-mode]").forEach((element) => element.addEventListener("click", () => switchAuthMode(element.dataset.authMode)));
-document.querySelector("#close-auth-dialog").addEventListener("click", () => authDialog.close());
-document.querySelector("#google-login").addEventListener("click", () => { try { sessionStorage.setItem("elitehub-pending-action", JSON.stringify(state.pendingAction)); } catch { } window.location.assign("/api/v1/auth/google"); });
+document.querySelector("#close-auth-dialog").addEventListener("click", () => { void motion.closeDialog(authDialog); });
+authDialog.addEventListener("cancel", (event) => { event.preventDefault(); void motion.closeDialog(authDialog); });
+authDialog.addEventListener("close", () => document.body.classList.remove("auth-modal-open"));
+document.querySelector("#auth-get-started").addEventListener("click", () => switchAuthMode("register"));
+googleLoginButton.addEventListener("click", () => { try { sessionStorage.setItem("elitehub-pending-action", JSON.stringify(state.pendingAction)); } catch { } window.location.assign("/api/v1/auth/google"); });
 
 document.querySelector("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget; const submit = form.querySelector("button[type=submit]"); clearErrors(form); setStatus(authStatus, "");
@@ -801,15 +899,15 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
   if (!/^\S+@\S+\.\S+$/.test(email)) return showInputError("login-email-error", "Digite um e-mail válido.");
   if (!password) return showInputError("login-password-error", "Informe sua senha.");
   setSubmitState(submit, true, "Entrando");
-  try { await request(endpoints.login, { method: "POST", body: JSON.stringify({ email, password, rememberMe: form.rememberMe.checked }) }); authDialog.close(); await initializeSession(true); } catch (error) { setStatus(authStatus, publicMessage(error)); } finally { setSubmitState(submit, false); }
+  try { await request(endpoints.login, { method: "POST", body: JSON.stringify({ email, password, rememberMe: form.rememberMe.checked }) }); await motion.closeDialog(authDialog); await initializeSession(true); } catch (error) { setStatus(authStatus, publicMessage(error)); } finally { setSubmitState(submit, false); }
 });
 
 document.querySelector("#register-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget; const submit = form.querySelector("button[type=submit]"); clearErrors(form); setStatus(authStatus, "");
-  const firstName = form.firstName.value.trim(); const lastName = form.lastName.value.trim(); const email = form.email.value.trim(); const password = form.password.value; const passwordConfirmation = form.passwordConfirmation.value;
-  if (!firstName) return showInputError("register-first-name-error", "Informe seu nome."); if (!lastName) return showInputError("register-last-name-error", "Informe seu sobrenome."); if (!/^\S+@\S+\.\S+$/.test(email)) return showInputError("register-email-error", "Digite um e-mail válido."); if (!passwordIsStrong(password)) return showInputError("register-password-error", "Sua senha precisa atender aos requisitos de segurança."); if (password !== passwordConfirmation) return showInputError("register-password-confirmation-error", "As senhas não coincidem.");
+  const fullName = form.fullName.value.trim(); const email = form.email.value.trim(); const password = form.password.value;
+  if (!fullName) return showInputError("register-full-name-error", "Informe seu nome completo."); if (!/^\S+@\S+\.\S+$/.test(email)) return showInputError("register-email-error", "Digite um e-mail válido."); if (!passwordIsStrong(password)) return showInputError("register-password-error", "Sua senha precisa atender aos requisitos de segurança.");
   setSubmitState(submit, true, "Criando conta");
-  try { const result = await request(endpoints.register, { method: "POST", body: JSON.stringify({ fullName: `${firstName} ${lastName}`, email, password, passwordConfirmation }) }); form.reset(); switchAuthMode("login", true); setStatus(authStatus, result.message, "success"); } catch (error) { setStatus(authStatus, publicMessage(error)); } finally { setSubmitState(submit, false); }
+  try { const result = await request(endpoints.register, { method: "POST", body: JSON.stringify({ fullName, email, password, passwordConfirmation: password }) }); form.reset(); switchAuthMode("login", true); setStatus(authStatus, result.message, "success"); } catch (error) { setStatus(authStatus, publicMessage(error)); } finally { setSubmitState(submit, false); }
 });
 
 document.querySelector("#recovery-form").addEventListener("submit", async (event) => {
@@ -839,11 +937,16 @@ document.querySelector("#apply-filters").addEventListener("click", () => { const
 document.querySelector("#clear-filters").addEventListener("click", () => { state.filters = { maxPriceCents: null, minPriceCents: null, sort: "newest" }; state.activeCategory = null; state.page.offset = 0; document.querySelector("#min-price").value = ""; document.querySelector("#max-price").value = ""; document.querySelector("#sort-select").value = "newest"; void loadCategories(); void loadProducts(); });
 document.querySelector("#cart-button").addEventListener("click", () => requireProtectedRoute("#carrinho", "Entre para acessar seu carrinho."));
 document.querySelectorAll("[data-protected-route]").forEach((element) => element.addEventListener("click", () => requireProtectedRoute(element.dataset.protectedRoute, `Entre para acessar ${element.getAttribute("aria-label")?.toLowerCase() || "esta área"}.`)));
-accountButton.addEventListener("click", () => { const open = accountMenu.hidden; accountMenu.hidden = !open; accountButton.setAttribute("aria-expanded", String(open)); });
+accountButton.addEventListener("click", () => { const open = accountMenu.hidden; if (open) void motion.show(accountMenu, "menu"); else closeAccountMenu(); accountButton.setAttribute("aria-expanded", String(open)); });
 document.querySelector("#mobile-menu-button").addEventListener("click", (event) => { const menu = document.querySelector("#market-nav"); const open = menu.classList.toggle("is-open"); event.currentTarget.setAttribute("aria-expanded", String(open)); });
 document.addEventListener("click", (event) => { if (!event.target.closest(".account-menu-wrap")) closeAccountMenu(); if (!event.target.closest(".search")) hideSuggestions(); });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeAccountMenu(); hideSuggestions(); } });
 window.addEventListener("hashchange", () => { void renderRoute(); });
+const syncHeaderMotion = () => {
+  document.querySelector(".site-header").classList.toggle("is-condensed", window.scrollY > 12);
+};
+window.addEventListener("scroll", syncHeaderMotion, { passive: true });
+syncHeaderMotion();
 
 const query = new URLSearchParams(window.location.search);
 const resetToken = query.get("reset_token");
@@ -856,6 +959,6 @@ syncThemeButtonLabels();
   await Promise.all([loadProviders(), request(endpoints.health).catch((error) => setStatus(marketStatus, publicMessage(error)))]);
   await initializeSession(Boolean(state.pendingAction));
   if (resetToken) showAuth("Defina uma nova senha para recuperar sua conta.", null, "reset");
-  if (oauthError) showAuth("Não foi possível concluir o login com Google. Tente novamente ou entre com e-mail.");
+  if (oauthError) showAuth("Não foi possível concluir o login com Google. Tente novamente ou entre com e-mail.", null, "login");
   await renderRoute();
 })();

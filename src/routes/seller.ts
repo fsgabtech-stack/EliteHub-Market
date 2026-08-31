@@ -6,6 +6,7 @@ import { requireAnyRole, requireAuthenticatedUser, requireVerifiedEmail } from "
 import { AppError, asyncRoute, invalidRequest } from "../http/errors.js";
 import { csrfProtection } from "../http/security.js";
 import { enqueueDomainEvent } from "../modules/events/outbox.js";
+import { invalidatePublicCatalogCache } from "../modules/catalog/cache.js";
 
 const sellerProfileSchema = z.object({
   description: z.string().trim().min(20).max(5_000).optional(),
@@ -152,6 +153,7 @@ export function registerSellerRoutes(router: Router): void {
         });
         return productId;
       });
+      await invalidatePublicCatalogCache();
       response.status(201).json({ id: created });
     }),
   );
@@ -170,17 +172,26 @@ export function registerSellerRoutes(router: Router): void {
       requireVerifiedEmail(user);
       await requireApprovedSeller(user.id);
       const product = parsed.data;
-      const updated = await query<{ id: string }>(
-        `UPDATE products
-            SET category_id = $3, title = $4, description = $5, price_cents = $6,
-                status = $7, sku = $8, attributes = $9::jsonb, updated_at = now()
-          WHERE id = $1 AND seller_id = $2 AND deleted_at IS NULL
-          RETURNING id`,
-        [productId.data, user.id, product.categoryId ?? null, product.title, product.description, product.priceCents, product.status, product.sku ?? null, JSON.stringify(product.attributes)],
-      );
-      if (!updated.rows[0]) {
-        throw new AppError(404, "NOT_FOUND");
-      }
+      await transaction(async (client) => {
+        const updated = await client.query<{ id: string }>(
+          `UPDATE products
+              SET category_id = $3, title = $4, description = $5, price_cents = $6,
+                  status = $7, sku = $8, attributes = $9::jsonb, updated_at = now()
+            WHERE id = $1 AND seller_id = $2 AND deleted_at IS NULL
+            RETURNING id`,
+          [productId.data, user.id, product.categoryId ?? null, product.title, product.description, product.priceCents, product.status, product.sku ?? null, JSON.stringify(product.attributes)],
+        );
+        if (!updated.rows[0]) {
+          throw new AppError(404, "NOT_FOUND");
+        }
+        await enqueueDomainEvent(client, {
+          aggregateId: productId.data,
+          aggregateType: "PRODUCT",
+          eventType: "ProductUpdated",
+          payload: { productId: productId.data, sellerId: user.id },
+        });
+      });
+      await invalidatePublicCatalogCache();
       response.status(204).send();
     }),
   );
@@ -199,17 +210,28 @@ export function registerSellerRoutes(router: Router): void {
       requireVerifiedEmail(user);
       await requireApprovedSeller(user.id);
       const variant = parsed.data;
-      const created = await query<{ id: string }>(
-        `INSERT INTO product_variants(product_id, sku, attributes, price_cents, stock_quantity)
-         SELECT $1, $3, $4::jsonb, $5, $6
-          WHERE EXISTS (SELECT 1 FROM products WHERE id = $1 AND seller_id = $2 AND deleted_at IS NULL)
-         RETURNING id`,
-        [productId.data, user.id, variant.sku ?? null, JSON.stringify(variant.attributes), variant.priceCents ?? null, variant.stockQuantity],
-      );
-      if (!created.rows[0]) {
-        throw new AppError(404, "NOT_FOUND");
-      }
-      response.status(201).json({ id: created.rows[0].id });
+      const created = await transaction(async (client) => {
+        const result = await client.query<{ id: string }>(
+          `INSERT INTO product_variants(product_id, sku, attributes, price_cents, stock_quantity)
+           SELECT $1, $3, $4::jsonb, $5, $6
+            WHERE EXISTS (SELECT 1 FROM products WHERE id = $1 AND seller_id = $2 AND deleted_at IS NULL)
+           RETURNING id`,
+          [productId.data, user.id, variant.sku ?? null, JSON.stringify(variant.attributes), variant.priceCents ?? null, variant.stockQuantity],
+        );
+        const createdVariant = result.rows[0];
+        if (!createdVariant) {
+          throw new AppError(404, "NOT_FOUND");
+        }
+        await enqueueDomainEvent(client, {
+          aggregateId: productId.data,
+          aggregateType: "PRODUCT",
+          eventType: "ProductUpdated",
+          payload: { productId: productId.data, sellerId: user.id, variantId: createdVariant.id },
+        });
+        return createdVariant;
+      });
+      await invalidatePublicCatalogCache();
+      response.status(201).json({ id: created.id });
     }),
   );
 
@@ -261,6 +283,7 @@ export function registerSellerRoutes(router: Router): void {
           payload: { productId: productId.data, variantId: body.data.variantId ?? null },
         });
       });
+      await invalidatePublicCatalogCache();
       response.status(204).send();
     }),
   );

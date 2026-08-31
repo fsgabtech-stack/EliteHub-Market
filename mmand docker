@@ -1,0 +1,36 @@
+warning: in the working copy of 'Dockerfile', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package-lock.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/openapi.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/admin.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/auth.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/catalog.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/files.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/public-sellers.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/seller.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scripts/validate-openapi.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/worker.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'static/elitehub.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'static/elitehub.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'static/elitehub.js', LF will be replaced by CRLF the next time Git touches it
+Dockerfile
+README.md
+package-lock.json
+package.json
+src/app.test.ts
+src/app.ts
+src/openapi.ts
+src/routes/admin.ts
+src/routes/auth.ts
+src/routes/catalog.ts
+src/routes/files.ts
+src/routes/public-sellers.ts
+src/routes/seller.ts
+src/scripts/validate-openapi.ts
+src/worker.ts
+static/elitehub.css
+static/elitehub.html
+static/elitehub.js

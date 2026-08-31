@@ -28,7 +28,7 @@ export const documentoOpenApi = {
       get: { description: "Consulta a sessão autenticada atual.", responses: { "200": { description: "Sessão ativa" }, "401": { description: "Sessão ausente ou expirada" } } },
     },
     "/api/v1/auth/providers": {
-      get: { description: "Informa os provedores de autenticação efetivamente habilitados para a interface pública.", responses: { "200": { description: "Provedores disponíveis" } } },
+      get: { description: "Informa se Google e Microsoft podem iniciar autenticação. A interface mantém os dois botões visíveis, mas habilita somente provedores configurados e implementados.", responses: { "200": { description: "Disponibilidade dos provedores" } } },
     },
     "/api/v1/auth/register": {
       post: { description: "Solicita o cadastro de uma conta de cliente sem enumerar e-mails existentes.", responses: { "202": { description: "Solicitação processada" } } },
@@ -64,16 +64,20 @@ export const documentoOpenApi = {
       get: { description: "Exemplo de rota autenticada por sessão ou token portador JWT.", responses: { "200": { description: "Usuário autenticado" }, "401": { description: "Sessão expirada" } } },
     },
     "/api/v1/catalog/categories": {
-      get: { description: "Lista categorias públicas do catálogo.", responses: { "200": { description: "Categorias" } } },
+      get: { description: "Lista categorias públicas que possuem ao menos um produto ativo de vendedor aprovado.", responses: { "200": { description: "Categorias publicadas" } } },
     },
     "/api/v1/catalog/products": {
-      get: { description: "Lista produtos ativos publicamente com paginação, busca, filtros de categoria, vendedor, faixa de preço e ordenação.", responses: { "200": { description: "Catálogo público paginado" } } },
+      get: { description: "Lista apenas produtos ativos de vendedores aprovados, com paginação, busca, filtros de categoria, vendedor, faixa de preço e ordenação. Expõe disponibilidade comercial, nunca a quantidade interna de estoque.", responses: { "200": { description: "Catálogo público paginado" } } },
     },
     "/api/v1/catalog/search-suggestions": {
-      get: { description: "Retorna sugestões públicas de títulos de produtos ativos para busca assistida.", responses: { "200": { description: "Sugestões de busca" } } },
+      get: { description: "Retorna sugestões de produtos ativos de vendedores aprovados para busca assistida.", responses: { "200": { description: "Sugestões de busca" } } },
     },
     "/api/v1/catalog/products/{id}": {
-      get: { description: "Obtém produto público, variantes, atributos e imagens.", responses: { "200": { description: "Produto" }, "404": { description: "Produto inexistente" } } },
+      get: { description: "Obtém produto publicado por vendedor aprovado, variantes, atributos e imagens. A disponibilidade é comercial e não revela o saldo interno de estoque.", responses: { "200": { description: "Produto" }, "404": { description: "Produto inexistente ou indisponível" } } },
+    },
+    "/api/v1/products/{id}/reviews": {
+      get: { description: "Lista avaliações publicadas de compradores verificados para produto ativo de vendedor aprovado.", responses: { "200": { description: "Avaliações públicas paginadas" }, "404": { description: "Produto inexistente ou indisponível" } } },
+      post: { description: "Envia avaliação para moderação. Exige sessão, e-mail confirmado e compra entregue do produto pelo próprio usuário.", responses: { "202": { description: "Avaliação recebida para moderação" }, "401": { description: "Sessão ausente ou expirada" }, "409": { description: "Compra entregue inexistente ou avaliação já enviada" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/categories": {
       get: { description: "Rota legada compatível para listagem de categorias.", responses: { "200": { description: "Categorias" } } },
@@ -167,8 +171,11 @@ export const documentoOpenApi = {
     "/api/v1/admin/coupons": {
       post: { description: "Cria cupom de plataforma ou de vendedor.", responses: { "201": { description: "Cupom criado" } }, security: [{ cookieSessao: [] }] },
     },
+    "/api/v1/admin/reviews/{id}": {
+      patch: { description: "Publica, oculta ou rejeita uma avaliação e registra auditoria. Permitida apenas a administração e suporte.", responses: { "204": { description: "Avaliação moderada" }, "404": { description: "Avaliação inexistente" } }, security: [{ cookieSessao: [] }] },
+    },
     "/api/v1/files/{id}": {
-      get: { description: "Redireciona imagens de produto publicamente e mantém documentos privados protegidos por posse ou papel administrativo.", responses: { "302": { description: "URL temporária" } } },
+      get: { description: "Redireciona imagem apenas quando vinculada a produto ativo de vendedor aprovado. Imagens privadas, documentos e avatares exigem posse ou papel administrativo e não revelam sua existência a visitantes.", responses: { "302": { description: "URL temporária" }, "404": { description: "Arquivo inexistente, não publicável ou sem acesso" } } },
     },
     "/api/v1/payments/webhooks/{provedor}": {
       post: { description: "Recebe evento de pagamento; exige assinatura válida, idempotência e auditoria.", responses: { "202": { description: "Evento aceito" }, "401": { description: "Assinatura inválida" } } },

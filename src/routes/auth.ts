@@ -83,7 +83,7 @@ const authLimiter = rateLimit({
 
 const googleInitiationLimiter = rateLimit({
   handler: (_request, response) => {
-    response.redirect("/static/elitehub.html?auth_error=google_rate_limited");
+    response.redirect("/?auth_error=google_rate_limited");
   },
   limit: 10,
   standardHeaders: "draft-8",
@@ -127,7 +127,10 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.get("/auth/providers", (_request, response) => {
-    response.json({ google: Boolean(config.google.clientId && config.google.clientSecret) });
+    response.json({
+      google: Boolean(config.google.clientId && config.google.clientSecret),
+      microsoft: false,
+    });
   });
 
   router.get(
@@ -395,14 +398,14 @@ export function registerAuthRoutes(router: Router): void {
 
   router.get("/auth/google", googleInitiationLimiter, asyncRoute(async (_request, response) => {
     if (!config.google.clientId || !config.google.clientSecret) {
-      response.redirect("/static/elitehub.html?auth_error=google_unavailable");
+      response.redirect("/?auth_error=google_unavailable");
       return;
     }
     try {
       response.redirect(await beginGoogleAuthorization());
     } catch {
       logger.warn("início do OAuth Google falhou");
-      response.redirect("/static/elitehub.html?auth_error=google_unavailable");
+      response.redirect("/?auth_error=google_unavailable");
     }
   }));
 
@@ -410,7 +413,7 @@ export function registerAuthRoutes(router: Router): void {
     const code = typeof request.query.code === "string" ? request.query.code : undefined;
     const state = typeof request.query.state === "string" ? request.query.state : undefined;
     if (!code || !state || typeof request.query.error === "string") {
-      response.redirect("/static/elitehub.html?auth_error=google_callback_failed");
+      response.redirect("/?auth_error=google_callback_failed");
       return;
     }
     try {
@@ -418,10 +421,10 @@ export function registerAuthRoutes(router: Router): void {
       response
         .cookie(SESSION_COOKIE, session.token, { ...sessionCookieOptions, maxAge: session.maxAgeMs })
         .cookie(ACCESS_TOKEN_COOKIE, issueAccessToken({ sessionId: session.sessionId, userId: session.userId }), accessTokenCookieOptions)
-        .redirect("/static/elitehub.html");
+        .redirect("/");
     } catch {
       logger.warn("callback do OAuth Google falhou");
-      response.redirect("/static/elitehub.html?auth_error=google_callback_failed");
+      response.redirect("/?auth_error=google_callback_failed");
     }
   }));
 

@@ -3,7 +3,7 @@
 Marketplace brasileiro implementado como monólito modular TypeScript. A aplicação preserva a stack existente — Express e PostgreSQL — e organiza os domínios por casos de uso, portas de infraestrutura e adaptadores HTTP. Não há um segundo backend Java: adicionar Spring Boot a este repositório criaria duplicação operacional e não resolveria nenhum requisito de negócio.
 
 ```text
-Frontend estático
+React 19 + Vite
        │
 Express /api/v1 ── PostgreSQL ── Outbox transacional ── Worker
        │                │                 │
@@ -18,7 +18,7 @@ Implementado no código:
 
 - autenticação com Argon2id, cookies HttpOnly, CSRF, OAuth Google com PKCE, token JWT curto em cookie HttpOnly, rotação da sessão opaca e revogação;
 - RBAC para `CUSTOMER`, `SELLER`, `PROFESSIONAL`, `ADMIN` e `SUPPORT`;
-- catálogo pesquisável e paginado, categorias, produtos, variantes, estoque e imagens S3/MinIO;
+- catálogo pesquisável e paginado, categorias somente com itens publicados, produtos de vendedores aprovados, variantes, disponibilidade comercial sem exposição do saldo de estoque e imagens S3/MinIO;
 - onboarding e aprovação de vendedor, gestão de produtos e ajustes auditáveis de estoque;
 - carrinho persistente, endereços, cupom, checkout idempotente e reserva de estoque transacional;
 - pedidos com histórico de estados, consulta por comprador ou vendedor e transições autorizadas;
@@ -28,8 +28,9 @@ Implementado no código:
 - Redis opcional para cache do catálogo e rate limiting distribuído; fallback local quando Redis não estiver configurado;
 - confirmação de e-mail com token de uso único, consentimentos LGPD, exportação de dados e anonimização condicionada à inexistência de pedidos ativos;
 - Docker, Compose, Nginx, GitHub Actions e configuração compatível com SonarQube.
-- experiência pública de marketplace: catálogo, busca com sugestões, filtros, ordenação, paginação, detalhes de produto, imagens, lojas aprovadas e páginas institucionais sem parede de autenticação;
+- experiência pública React de marketplace: catálogo, busca com sugestões, filtros, ordenação, paginação, detalhes de produto, imagens, lojas aprovadas e páginas institucionais sem parede de autenticação;
 - favoritos e notificações persistentes por usuário, acessíveis apenas após autenticação.
+- avaliações vinculadas a compras entregues, com moderação, auditoria, reputação pública agregada e identidade do comprador minimizada.
 
 Não são afirmados como ativos sem configuração externa e teste real:
 
@@ -44,17 +45,28 @@ A página inicial é pública. Um visitante pode abrir o catálogo, usar busca c
 
 São públicos por `GET`:
 
-- `/api/v1/catalog/categories`, `/api/v1/catalog/products`, `/api/v1/catalog/search-suggestions` e `/api/v1/catalog/products/:id`;
+- `/api/v1/catalog/categories`, `/api/v1/catalog/products`, `/api/v1/catalog/search-suggestions` e `/api/v1/catalog/products/:id`, sempre limitados a produtos ativos de vendedores aprovados;
 - `/api/v1/sellers/:id` para perfis de lojas aprovadas;
-- `/api/v1/files/:id` somente quando o arquivo é imagem de produto; documentos de vendedor e avatares continuam privados;
-- `/static/elitehub.html`, `/static/help.html` e páginas legais.
+- `/api/v1/products/:id/reviews` para avaliações já publicadas de compradores verificados;
+- `/api/v1/files/:id` somente quando o arquivo é imagem vinculada a produto ativo de vendedor aprovado; imagens de rascunho, documentos de vendedor e avatares continuam privados;
+- `/`, `/catalogo`, `/produto/:id`, `/loja/:id`, `/ajuda` e páginas legais. O endereço legado `/static/elitehub.html` redireciona para a SPA React quando o cliente de produção está compilado.
 
 Continuam protegidos por sessão, RBAC e, nas escritas, CSRF:
 
 - carrinho, checkout, pedidos, endereços, favoritos, notificações, conta, vendedor, administração, arquivos privados e pagamentos;
-- nenhuma rota pública entrega e-mail, telefone, endereço, documento, dados de pagamento, metadados administrativos ou auditoria de vendedores e usuários.
+- nenhuma rota pública entrega e-mail, telefone, endereço, documento, dados de pagamento, metadados administrativos, auditoria de vendedores e usuários ou quantidades internas de estoque.
 
-Ao clicar em adicionar ao carrinho, comprar agora, carrinho, favoritos ou notificações sem sessão, a interface abre o modal de autenticação com o motivo da solicitação. A intenção — produto, variação, quantidade e rota de retorno — é guardada apenas na sessão do navegador. Após login por e-mail/senha ou retorno OAuth, a ação é retomada contra a API real. O carrinho de visitante permanece desativado; a coluna de token de convidado no banco é apenas preparação para decisão futura.
+Ao clicar em adicionar ao carrinho, comprar agora, carrinho, favoritos ou notificações sem sessão, a interface abre primeiro a tela de boas-vindas da EliteHub, com ilustração vetorial central, criação de conta, entrada por e-mail e os provedores Google e Microsoft. A intenção — produto, variação, quantidade e rota de retorno — é guardada apenas na sessão do navegador. Após login por e-mail/senha ou retorno OAuth, a ação é retomada contra a API real. O carrinho de visitante permanece desativado; a coluna de token de convidado no banco é apenas preparação para decisão futura.
+
+Os botões dos provedores ficam visíveis para preservar a hierarquia da interface. Eles são habilitados somente quando a API informa que o provedor está configurado: Google já possui fluxo OAuth 2.0 com PKCE; Microsoft está exibido como indisponível até que o fluxo OAuth equivalente seja implementado e receba credenciais aprovadas. Nenhum botão indisponível inicia autenticação simulada.
+
+## Frontend React e sistema de motion
+
+O cliente web é uma SPA React 19 compilada pelo Vite e entregue pelo Express em produção. A API Node/Express, cookies `HttpOnly`, CSRF, RBAC, OpenAPI e todos os contratos `/api/v1` continuam sendo a fonte de verdade. Não há duplicação de backend nem autenticação simulada.
+
+`framer-motion` controla transições de rota, modal de autenticação, cartões, listas, galeria e menus com springs amortecidas. O CSS preserva os tokens visuais da EliteHub e `prefers-reduced-motion` reduz movimento decorativo. A animação é limitada a propriedades compostas pelo navegador (`transform` e `opacity`) e os itens mantêm chaves estáveis para evitar desmontagens e reflow visual desnecessário.
+
+As rotas React implementadas são catálogo, produto, loja pública, carrinho, checkout, favoritos, notificações, pedidos, conta, onboarding de vendedor e ajuda. Endpoints administrativos e de gestão de produto continuam protegidos no backend; uma tela não é criada sem um fluxo de negócio autorizado e persistente.
 
 ## Pré-requisitos
 
@@ -74,10 +86,16 @@ Edite o `.env` local sem versioná-lo. São obrigatórios ao menos `DATABASE_URL
 ```powershell
 npm run db:migrate
 npm run db:status
-npm run dev
+npm run dev:api
 ```
 
-A interface pública é servida pelo backend em [http://localhost:8000/static/elitehub.html](http://localhost:8000/static/elitehub.html). Não use `file://` nem Live Server. A página de ajuda pública está em `/static/help.html`.
+Em outro terminal, inicie o cliente React com proxy para a API local:
+
+```powershell
+npm run dev:web
+```
+
+No desenvolvimento, a interface React fica em [http://localhost:5173](http://localhost:5173). Para validar o pacote de produção localmente, execute `npm run build` e depois `npm run start`; a interface será entregue em [http://localhost:8000](http://localhost:8000). Não use `file://` nem Live Server.
 
 Em outro terminal, execute o worker:
 
@@ -87,11 +105,13 @@ npm run worker
 
 ## Ambiente composto
 
-O Compose inicia PostgreSQL, Redis e MinIO junto da API e do worker. Por padrão, publica a API em `8001` e PostgreSQL em `5433`, sem colidir com serviços locais em `8000` e `5432`. Antes de usá-lo, defina no `.env` local valores não vazios para `POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `SESSION_SECRET`, `SHIPPING_FIXED_CENTS` e `MARKETPLACE_COMMISSION_BPS`.
+O Compose inicia PostgreSQL, Redis e MinIO junto da API, cliente React compilado e worker. Por padrão, publica a plataforma em `8001` e PostgreSQL em `5433`, sem colidir com serviços locais em `8000` e `5432`. Antes de usá-lo, defina no `.env` local valores não vazios para `POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `SESSION_SECRET`, `SHIPPING_FIXED_CENTS` e `MARKETPLACE_COMMISSION_BPS`.
 
 ```powershell
 docker compose up --build
 ```
+
+A interface React estará em [http://localhost:8001](http://localhost:8001). Após alterações no frontend, repita `docker compose up --build -d`; o Docker não atualiza um bundle já embutido na imagem em execução.
 
 O serviço `migrate` é executado antes da API e do worker; acompanhe-o com `docker compose logs migrate`. Não aplique manualmente uma migração em paralelo ao Compose.
 
@@ -112,6 +132,7 @@ Rotas centrais:
 | Autenticação | `/api/v1/auth/register`, `/login`, `/refresh`, `/logout`, `/password-recovery`, `/password-reset`, `/email-verification` |
 | Catálogo | `/api/v1/catalog/categories`, `/api/v1/catalog/products`, `/api/v1/catalog/products/:id` |
 | Descoberta pública | `/api/v1/catalog/search-suggestions`, `/api/v1/sellers/:id`, `/api/v1/files/:id` para imagens de produto |
+| Avaliações | `GET/POST /api/v1/products/:id/reviews`, `PATCH /api/v1/admin/reviews/:id` |
 | Carrinho | `/api/v1/cart`, `/api/v1/cart/items` |
 | Endereços e checkout | `/api/v1/addresses`, `/api/v1/checkout` |
 | Conta e LGPD | `/api/v1/account/consents`, `/data-export`, `/deletion` |

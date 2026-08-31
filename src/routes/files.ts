@@ -9,6 +9,7 @@ import { requireAnyRole, requireAuthenticatedUser, requireVerifiedEmail } from "
 import { AppError, asyncRoute, invalidRequest } from "../http/errors.js";
 import { csrfProtection } from "../http/security.js";
 import { createReadUrl, deleteStoredFile, storeFile } from "../modules/files/storage.js";
+import { invalidatePublicCatalogCache } from "../modules/catalog/cache.js";
 
 const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
@@ -66,6 +67,7 @@ export function registerFileRoutes(router: Router): void {
           );
           return createdAsset.id;
         });
+        await invalidatePublicCatalogCache();
         response.status(201).json({ id: assetId });
       } catch (error) {
         await deleteStoredFile(storageKey).catch(() => undefined);
@@ -89,10 +91,36 @@ export function registerFileRoutes(router: Router): void {
       if (!value) {
         throw new AppError(404, "NOT_FOUND");
       }
-      if (value.purpose !== "PRODUCT_IMAGE") {
-        const user = await requireAuthenticatedUser(request);
+      if (value.purpose === "PRODUCT_IMAGE") {
+        const published = await query<{ id: string }>(
+          `SELECT product_images.id
+             FROM product_images
+             JOIN products ON products.id = product_images.product_id
+               AND products.status = 'ACTIVE' AND products.deleted_at IS NULL
+             JOIN users ON users.id = products.seller_id AND users.deleted_at IS NULL
+             JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+               AND seller_profiles.approval_status = 'APPROVED'
+            WHERE product_images.asset_id = $1
+            LIMIT 1`,
+          [assetId.data],
+        );
+        if (published.rows[0]) {
+          response.redirect(302, await createReadUrl(value.storage_key));
+          return;
+        }
+      }
+      {
+        let user;
+        try {
+          user = await requireAuthenticatedUser(request);
+        } catch (error) {
+          if (error instanceof AppError && error.status === 401) {
+            throw new AppError(404, "NOT_FOUND");
+          }
+          throw error;
+        }
         if (user.id !== value.owner_user_id && !user.roles.includes("ADMIN")) {
-          throw new AppError(403, "FORBIDDEN");
+          throw new AppError(404, "NOT_FOUND");
         }
       }
       response.redirect(302, await createReadUrl(value.storage_key));

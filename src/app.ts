@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 
 import cookieParser from "cookie-parser";
 import express from "express";
@@ -27,6 +28,7 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerOrderRoutes } from "./routes/orders.js";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.js";
 import { registerPublicSellerRoutes } from "./routes/public-sellers.js";
+import { registerReviewRoutes } from "./routes/reviews.js";
 import { registerSellerRoutes } from "./routes/seller.js";
 
 function validMetricsAuthorization(value: string | undefined): boolean {
@@ -44,6 +46,9 @@ function validMetricsAuthorization(value: string | undefined): boolean {
 
 export function criarAplicacao(): express.Express {
   const app = express();
+  const clientDirectory = join(process.cwd(), "dist", "client");
+  const clientIndex = join(clientDirectory, "index.html");
+  const clientAvailable = existsSync(clientIndex);
 
   app.disable("x-powered-by");
   app.set("trust proxy", config.trustProxyHops);
@@ -66,6 +71,10 @@ export function criarAplicacao(): express.Express {
   registerPaymentWebhookRoutes(app);
   app.use(express.json({ limit: "64kb", type: ["application/json", "application/*+json"] }));
   app.use(cookieParser());
+  if (clientAvailable) {
+    app.get("/static/elitehub.html", (_request, response) => response.redirect(302, "/"));
+    app.use(express.static(clientDirectory, { index: false, maxAge: "1h" }));
+  }
   app.use("/static", express.static(join(process.cwd(), "static"), { fallthrough: false, index: false }));
   app.get("/openapi.json", (_request, response) => response.json(documentoOpenApi));
   app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(documentoOpenApi, { customSiteTitle: "EliteHub Connect API" }));
@@ -89,6 +98,7 @@ export function criarAplicacao(): express.Express {
   registerCatalogRoutes(api);
   registerCatalogRoutes(api, "/catalog");
   registerPublicSellerRoutes(api);
+  registerReviewRoutes(api);
   registerAccountRoutes(api);
   registerAddressRoutes(api);
   registerCartRoutes(api);
@@ -118,6 +128,10 @@ export function criarAplicacao(): express.Express {
       return;
     }
     if (request.accepts("html")) {
+      if (clientAvailable) {
+        response.sendFile(clientIndex);
+        return;
+      }
       response.redirect(302, "/static/elitehub.html");
       return;
     }
