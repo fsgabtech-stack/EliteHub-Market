@@ -19,8 +19,14 @@
     "typecheck:api": "tsc --noEmit -p tsconfig.json",
     "typecheck:web": "tsc --noEmit -p web/tsconfig.json",
     "lint": "eslint src web --max-warnings=0",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "npm run test:api && npm run test:web",
+    "test:api": "node --import tsx --test src/**/*.test.ts",
+    "test:web": "vitest run --config web/vitest.config.ts",
+    "test:web:watch": "vitest --config web/vitest.config.ts",
+    "test:e2e": "playwright test",
     "db:migrate": "tsx src/scripts/migrate.ts",
+    "db:seed": "tsx src/scripts/seed-development.ts",
+    "db:reset-development": "tsx src/scripts/reset-development.ts",
     "db:status": "tsx src/scripts/migration-status.ts",
     "worker": "tsx src/worker.ts",
     "openapi:validate": "tsx src/scripts/validate-openapi.ts"
@@ -55,6 +61,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
     "@types/cookie-parser": "^1.4.9",
     "@types/express": "^5.0.3",
     "@types/multer": "^2.0.0",
@@ -66,9 +76,12 @@
     "@types/swagger-ui-express": "^4.1.8",
     "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.35.0",
+    "jsdom": "^30.0.1",
+    "playwright": "^1.62.1",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.1",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }
