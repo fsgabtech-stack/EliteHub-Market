@@ -25,3 +25,46 @@ jobs:
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
       - run: docker build --tag elitehub-connect:${{ github.sha }} .
+      - name: Instalar Chromium para os testes E2E
+        run: npx playwright install --with-deps chromium
+      - name: Iniciar ambiente efêmero do Compose
+        env:
+          API_HOST_PORT: "8001"
+          MARKETPLACE_COMMISSION_BPS: "1200"
+          MINIO_ROOT_PASSWORD: elitehub-ci-minio-password
+          MINIO_ROOT_USER: elitehub-ci-minio
+          POSTGRES_PASSWORD: elitehub-ci-postgres-password
+          SESSION_SECRET: elitehub-ci-session-secret-com-mais-de-trinta-e-dois-caracteres
+          SHIPPING_FIXED_CENTS: "1990"
+        run: docker compose up --build -d
+      - name: Validar fluxos integrados no Compose
+        env:
+          API_HOST_PORT: "8001"
+          MARKETPLACE_COMMISSION_BPS: "1200"
+          MINIO_ROOT_PASSWORD: elitehub-ci-minio-password
+          MINIO_ROOT_USER: elitehub-ci-minio
+          POSTGRES_PASSWORD: elitehub-ci-postgres-password
+          SESSION_SECRET: elitehub-ci-session-secret-com-mais-de-trinta-e-dois-caracteres
+          SHIPPING_FIXED_CENTS: "1990"
+        run: npm run test:e2e
+      - name: Validar recibos de webhook no PostgreSQL efêmero
+        env:
+          DATABASE_URL: postgresql://elitehub:elitehub-ci-postgres-password@127.0.0.1:5433/elitehub_connect
+          MARKETPLACE_COMMISSION_BPS: "1200"
+          MINIO_ROOT_PASSWORD: elitehub-ci-minio-password
+          MINIO_ROOT_USER: elitehub-ci-minio
+          POSTGRES_PASSWORD: elitehub-ci-postgres-password
+          SESSION_SECRET: elitehub-ci-session-secret-com-mais-de-trinta-e-dois-caracteres
+          SHIPPING_FIXED_CENTS: "1990"
+        run: npm run test:api
+      - name: Limpar ambiente efêmero do Compose
+        if: always()
+        env:
+          API_HOST_PORT: "8001"
+          MARKETPLACE_COMMISSION_BPS: "1200"
+          MINIO_ROOT_PASSWORD: elitehub-ci-minio-password
+          MINIO_ROOT_USER: elitehub-ci-minio
+          POSTGRES_PASSWORD: elitehub-ci-postgres-password
+          SESSION_SECRET: elitehub-ci-session-secret-com-mais-de-trinta-e-dois-caracteres
+          SHIPPING_FIXED_CENTS: "1990"
+        run: docker compose down --volumes --remove-orphans
