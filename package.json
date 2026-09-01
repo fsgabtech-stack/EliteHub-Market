@@ -20,7 +20,7 @@
     "typecheck:web": "tsc --noEmit -p web/tsconfig.json",
     "lint": "eslint src web --max-warnings=0",
     "test": "npm run test:api && npm run test:web",
-    "test:api": "node --import tsx --test src/**/*.test.ts",
+    "test:api": "node --env-file=.env.test --import tsx --test src/**/*.test.ts",
     "test:web": "vitest run --config web/vitest.config.ts",
     "test:web:watch": "vitest --config web/vitest.config.ts",
     "test:e2e": "playwright test",

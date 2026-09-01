@@ -82,10 +82,29 @@ async function receiveWebhook(request: Request, response: Response): Promise<voi
     response.status(202).json({ received: true, replayed: true });
     return;
   }
+  const claimed = await transaction(async (client) => {
+    const update = await client.query<{ id: string }>(
+      `UPDATE payment_webhook_receipts
+          SET attempt_count = attempt_count + 1, processing_error = NULL, processing_started_at = now()
+        WHERE id = $1
+          AND processed_at IS NULL
+          AND (processing_started_at IS NULL OR processing_started_at < now() - interval '5 minutes')
+        RETURNING id`,
+      [receipt.id],
+    );
+    return update.rows[0] ?? null;
+  });
+  if (!claimed) {
+    response.status(202).json({ received: true, replayed: true });
+    return;
+  }
   try {
     await processVerifiedProviderReference(provider, identity.providerReference);
     await transaction(async (client) => {
-      await client.query("UPDATE payment_webhook_receipts SET processed_at = now(), processing_error = NULL WHERE id = $1", [receipt.id]);
+      await client.query(
+        "UPDATE payment_webhook_receipts SET processed_at = now(), processing_error = NULL, processing_started_at = NULL WHERE id = $1",
+        [receipt.id],
+      );
       await client.query(
         `INSERT INTO audit_events(action, target_type, metadata)
          VALUES ('PAYMENT_WEBHOOK_PROCESSED', 'PAYMENT_WEBHOOK', jsonb_build_object('provider', $1::text, 'eventId', $2::text))`,
@@ -95,7 +114,7 @@ async function receiveWebhook(request: Request, response: Response): Promise<voi
   } catch (error) {
     await transaction(async (client) => {
       await client.query(
-        "UPDATE payment_webhook_receipts SET processing_error = $2 WHERE id = $1",
+        "UPDATE payment_webhook_receipts SET processing_error = $2, processing_started_at = NULL WHERE id = $1",
         [receipt.id, error instanceof Error ? error.name : "Erro desconhecido"],
       );
     });
