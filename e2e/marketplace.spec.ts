@@ -105,6 +105,8 @@ test.describe.serial("marketplace no Compose", () => {
     await page.getByRole("button", { name: "Comprar agora" }).click();
     await entrarPeloModal(page, "cliente.dev@elitehub.local", "ClienteEliteHub#2026");
     await expect(page).toHaveURL(/\/checkout$/);
+    await expect(page.getByText("Entrega padrão EliteHub")).toBeVisible();
+    await expect(page.getByText(/Ambiente de desenvolvimento: o pedido será reservado sem cobrança/)).toBeVisible();
     await page.getByRole("button", { name: "Criar pedido" }).click();
     await expect(page).toHaveURL(/\/pedidos$/);
     await expect(page.getByText(/PENDING_PAYMENT/)).toBeVisible();
@@ -137,6 +139,21 @@ test.describe.serial("marketplace no Compose", () => {
     await page.goto("/pedidos");
     await page.getByRole("tab", { name: "Vendas recebidas" }).click();
     await expect(page.getByText("Pedido EH-DEV-HISTORICO-0001")).toBeVisible();
+  });
+
+  test("vendedor registra separação e rastreio em pedido persistente", async ({ page }) => {
+    await page.goto(`/produto/${await idDoProduto(page, "Fone")}`);
+    await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+    await entrarPeloModal(page, "vendedor.dev@elitehub.local", "VendedorEliteHub#2026");
+    await page.goto("/pedidos");
+    await page.getByRole("tab", { name: "Vendas recebidas" }).click();
+    const pedido = page.locator(".order-item-react").filter({ hasText: "EH-DEV-ENVIO-0001" });
+    await pedido.getByRole("button", { name: "Iniciar separação" }).click();
+    await pedido.getByLabel("Transportadora").fill("Correios");
+    await pedido.getByLabel("Código de rastreio").fill("BR123456789EH");
+    await pedido.getByRole("button", { name: "Marcar como enviado" }).click();
+    await expect(pedido.getByText("Rastreio:")).toBeVisible();
+    await expect(pedido.getByText("BR123456789EH")).toBeVisible();
   });
 
   test("administrador modera vendedor e avaliação persistentes", async ({ page }) => {

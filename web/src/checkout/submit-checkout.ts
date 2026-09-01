@@ -1,7 +1,15 @@
 import type { Carrinho } from "../types";
 import type { RequisicaoDoMercado } from "../auth/pending-action";
 
-export type CheckoutResponse = { payment: { integrationPending: boolean } };
+export type CheckoutResponse = {
+  payment: { integrationPending: boolean };
+  shipping: {
+    amountCents: number;
+    estimatedMaxBusinessDays: number;
+    estimatedMinBusinessDays: number;
+    service: string;
+  };
+};
 
 export function checkoutDisponivel(cart: Carrinho | null, addressId: string | undefined): boolean {
   return Boolean(addressId && cart?.items.length);

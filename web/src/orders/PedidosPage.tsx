@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { mensagemPublica, requisicao } from "../api";
 import { useMercado } from "../app/mercado-context";
@@ -7,13 +7,82 @@ import { Carregando, EstadoVazio } from "../shared/estado";
 import { currency, date } from "../shared/formatacao";
 import { AreaProtegida, PainelPrivado } from "../shared/privado";
 
-type Pedido = { createdAt: string; id: string; number: string; paymentStatus: string; status: string; totalCents: number };
+type FretePedido = {
+  amountCents: number;
+  carrier: string | null;
+  deliveredAt: string | null;
+  estimatedMaxBusinessDays: number | null;
+  estimatedMinBusinessDays: number | null;
+  service: string;
+  shippedAt: string | null;
+  trackingCode: string | null;
+};
+
+type Pedido = {
+  createdAt: string;
+  id: string;
+  number: string;
+  paymentStatus: string;
+  shipping: FretePedido;
+  status: "CANCELLED" | "CREATED" | "DELIVERED" | "FAILED" | "PAID" | "PENDING_PAYMENT" | "PROCESSING" | "REFUNDED" | "SHIPPED";
+  totalCents: number;
+};
+
+type DadosEnvio = { carrier: string; trackingCode: string };
+
+function resumoEntrega(frete: FretePedido): string {
+  const prazo = frete.estimatedMinBusinessDays === null || frete.estimatedMaxBusinessDays === null
+    ? "Prazo será confirmado pela loja."
+    : `Previsão de ${frete.estimatedMinBusinessDays} a ${frete.estimatedMaxBusinessDays} dias úteis.`;
+  return `${frete.service} · ${currency(frete.amountCents)} · ${prazo}`;
+}
 
 export function PedidosPage(): ReactNode {
-  const { user } = useMercado();
+  const { publicarAviso, user } = useMercado();
   const [scope, setScope] = useState<"mine" | "received">("mine");
   const [items, setItems] = useState<Pedido[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { void requisicao<{ items: Pedido[] }>(`/api/v1/orders?scope=${scope}`).then((result) => { setItems(result.items); setError(null); }).catch((failure) => setError(mensagemPublica(failure))); }, [scope]);
-  return <AreaProtegida message="Entre para acessar seus pedidos."><PainelPrivado title="Meus pedidos" description="Acompanhe seus pedidos e os respectivos status.">{user?.roles.includes("SELLER") ? <div className="page-tabs" role="tablist"><button type="button" role="tab" aria-selected={scope === "mine"} onClick={() => setScope("mine")}>Minhas compras</button><button type="button" role="tab" aria-selected={scope === "received"} onClick={() => setScope("received")}>Vendas recebidas</button></div> : null}{error ? <EstadoVazio title="Não foi possível carregar os pedidos" description={error} /> : !items ? <Carregando /> : !items.length ? <EstadoVazio title="Você ainda não tem pedidos" description="Quando concluir uma compra, ela aparecerá nesta área." /> : <div className="notification-list">{items.map((item) => <motion.article className="notification-item" key={item.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}><div><h2>Pedido {item.number}</h2><p>{currency(item.totalCents)} · {item.status} · pagamento {item.paymentStatus}</p></div><time dateTime={item.createdAt}>{date(item.createdAt)}</time></motion.article>)}</div>}</PainelPrivado></AreaProtegida>;
+  const [enviando, setEnviando] = useState<string | null>(null);
+  const [dadosEnvio, setDadosEnvio] = useState<Record<string, DadosEnvio>>({});
+
+  const load = useCallback(async () => {
+    try {
+      const result = await requisicao<{ items: Pedido[] }>(`/api/v1/orders?scope=${scope}`);
+      setItems(result.items);
+      setError(null);
+    } catch (failure) {
+      setError(mensagemPublica(failure));
+    }
+  }, [scope]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const atualizarStatus = async (pedido: Pedido, status: "DELIVERED" | "PROCESSING" | "SHIPPED", event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    const envio = dadosEnvio[pedido.id];
+    if (status === "SHIPPED" && (!envio?.carrier.trim() || !envio.trackingCode.trim())) {
+      publicarAviso("Informe a transportadora e o código de rastreio antes de registrar o envio.");
+      return;
+    }
+    const envioValidado = status === "SHIPPED" ? envio : undefined;
+    setEnviando(pedido.id);
+    try {
+      await requisicao(`/api/v1/orders/${pedido.id}/status`, {
+        body: JSON.stringify(envioValidado ? { shipment: { carrier: envioValidado.carrier.trim(), trackingCode: envioValidado.trackingCode.trim() }, status } : { status }),
+        method: "POST",
+      });
+      publicarAviso(status === "PROCESSING" ? "Pedido movido para separação." : status === "SHIPPED" ? "Envio registrado e cliente notificado." : "Entrega confirmada.", "success");
+      await load();
+    } catch (failure) {
+      publicarAviso(mensagemPublica(failure));
+    } finally {
+      setEnviando(null);
+    }
+  };
+
+  const atualizarDadosEnvio = (id: string, campo: keyof DadosEnvio, valor: string) => {
+    setDadosEnvio((atual) => ({ ...atual, [id]: { carrier: atual[id]?.carrier ?? "", trackingCode: atual[id]?.trackingCode ?? "", [campo]: valor } }));
+  };
+
+  return <AreaProtegida message="Entre para acessar seus pedidos."><PainelPrivado title="Meus pedidos" description="Acompanhe compras, entrega e operações de venda.">{user?.roles.includes("SELLER") ? <div className="page-tabs" role="tablist"><button type="button" role="tab" aria-selected={scope === "mine"} onClick={() => setScope("mine")}>Minhas compras</button><button type="button" role="tab" aria-selected={scope === "received"} onClick={() => setScope("received")}>Vendas recebidas</button></div> : null}{error ? <EstadoVazio title="Não foi possível carregar os pedidos" description={error} /> : !items ? <Carregando /> : !items.length ? <EstadoVazio title="Você ainda não tem pedidos" description="Quando concluir uma compra, ela aparecerá nesta área." /> : <div className="notification-list">{items.map((item) => <motion.article className="notification-item order-item-react" key={item.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}><div><h2>Pedido {item.number}</h2><p>{currency(item.totalCents)} · {item.status} · pagamento {item.paymentStatus}</p><p className="order-shipping-react">{resumoEntrega(item.shipping)}</p>{item.shipping.trackingCode ? <p className="order-shipping-react">Rastreio: <strong>{item.shipping.carrier}</strong> · {item.shipping.trackingCode}</p> : null}</div><time dateTime={item.createdAt}>{date(item.createdAt)}</time>{scope === "received" && item.status === "PAID" ? <div className="fulfillment-actions-react"><button className="button button--secondary" type="button" disabled={enviando === item.id} onClick={() => void atualizarStatus(item, "PROCESSING")}>{enviando === item.id ? "Atualizando…" : "Iniciar separação"}</button></div> : null}{scope === "received" && item.status === "PROCESSING" ? <form className="fulfillment-actions-react fulfillment-form-react" onSubmit={(event) => void atualizarStatus(item, "SHIPPED", event)}><label className="field-group"><span>Transportadora</span><input value={dadosEnvio[item.id]?.carrier ?? ""} onChange={(event) => atualizarDadosEnvio(item.id, "carrier", event.target.value)} autoComplete="organization" required /></label><label className="field-group"><span>Código de rastreio</span><input value={dadosEnvio[item.id]?.trackingCode ?? ""} onChange={(event) => atualizarDadosEnvio(item.id, "trackingCode", event.target.value)} autoComplete="off" required /></label><button className="button button--primary" type="submit" disabled={enviando === item.id}>{enviando === item.id ? "Registrando…" : "Marcar como enviado"}</button></form> : null}{scope === "received" && item.status === "SHIPPED" ? <div className="fulfillment-actions-react"><button className="button button--secondary" type="button" disabled={enviando === item.id} onClick={() => void atualizarStatus(item, "DELIVERED")}>{enviando === item.id ? "Atualizando…" : "Marcar como entregue"}</button></div> : null}</motion.article>)}</div>}</PainelPrivado></AreaProtegida>;
 }

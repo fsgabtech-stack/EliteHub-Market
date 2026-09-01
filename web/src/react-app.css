@@ -26,6 +26,11 @@
 .info-panel dl > div { display:grid; grid-template-columns:minmax(120px,.36fr) 1fr; gap:var(--space-3); padding:9px 0; border-bottom:1px solid var(--color-border); }
 .info-panel dt { font-weight:800; }.info-panel dd { margin:0; color:var(--color-text-muted); }
 .admin-grid-react { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-5); margin-top:var(--space-5); }
+.operations-summary-react { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-3); margin-top:var(--space-5); }
+.operations-summary-react article { display:grid; gap:4px; min-height:128px; padding:var(--space-4); border:1px solid var(--color-border); border-radius:var(--radius-md); background:var(--color-surface); }
+.operations-summary-react span,.operations-summary-react small { color:var(--color-text-muted); }
+.operations-summary-react strong { color:var(--color-primary-dark); font-size:1.7rem; line-height:1.1; }
+.operations-summary-react small { line-height:1.35; }
 .admin-list-react { display:grid; gap:var(--space-4); margin-top:var(--space-4); }
 .admin-list-react article { padding-top:var(--space-4); border-top:1px solid var(--color-border); }
 .admin-list-react h3 { margin:0; }.admin-list-react p { margin:8px 0; color:var(--color-text-muted); }
@@ -34,6 +39,16 @@
 .quantity-control-react button { min-height:34px; border:0; background:transparent; color:var(--color-primary-dark); font-size:20px; font-weight:800; cursor:pointer; }
 .quantity-control-react button:hover:not(:disabled),.quantity-control-react button:focus-visible { background:var(--color-primary-soft); outline:0; }
 .quantity-control-react output { min-width:34px; color:var(--color-text); font-weight:800; text-align:center; }
+.shipping-quote { display:grid; gap:4px; margin:var(--space-3) 0; padding:12px 14px; border:1px solid color-mix(in srgb,var(--color-primary) 28%,var(--color-border)); border-radius:var(--radius-sm); background:var(--color-primary-soft); color:var(--color-text); }
+.shipping-quote span,.checkout-payment-message,.order-shipping-react { color:var(--color-text-muted); font-size:.9rem; }
+.checkout-payment-message { margin:var(--space-4) 0 var(--space-3); }
+.payment-options label:has(input:disabled) { cursor:not-allowed; opacity:.62; }
+.order-item-react { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--space-3); }
+.order-item-react > time { grid-column:2; grid-row:1; white-space:nowrap; }
+.order-shipping-react { margin:6px 0 0; }
+.fulfillment-actions-react { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:var(--space-3); align-items:end; padding-top:var(--space-3); border-top:1px solid var(--color-border); }
+.fulfillment-form-react { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)) auto; }
+.fulfillment-form-react .button { align-self:end; }
 .icone { flex:0 0 auto; transform-origin:center; will-change:transform; }
 .icone--heart[data-ativo="true"] { fill:currentcolor; }
 .icon-button:hover .icone--bell,.icon-button:focus-visible .icone--bell { animation:icone-sino .52s cubic-bezier(.36,.07,.19,.97); }
@@ -57,5 +72,5 @@
 @keyframes icone-compartilhar { 0%,100% { transform:rotate(0deg) scale(1); } 50% { transform:rotate(-9deg) scale(1.07); } }
 @keyframes icone-fechar { to { transform:rotate(90deg); } }
 @keyframes route-pulse { 0%,100% { transform:scale(.85); box-shadow:0 0 0 0 rgb(0 91 197 / 22%); } 50% { transform:scale(1); box-shadow:0 0 0 9px rgb(0 91 197 / 0%); } }
-@media (max-width:720px) { .address-form-react,.admin-grid-react { grid-template-columns:1fr; }.market-nav.is-open { display:flex; }.auth-overlay { align-items:start; padding:10px; }.auth-overlay .auth-dialog { width:min(400px,calc(100vw - 20px)); }.auth-provider-list { gap:9px; } }
+@media (max-width:720px) { .address-form-react,.admin-grid-react,.fulfillment-form-react,.operations-summary-react { grid-template-columns:1fr; }.order-item-react { grid-template-columns:1fr; }.order-item-react > time { grid-column:auto; grid-row:auto; }.market-nav.is-open { display:flex; }.auth-overlay { align-items:start; padding:10px; }.auth-overlay .auth-dialog { width:min(400px,calc(100vw - 20px)); }.auth-provider-list { gap:9px; } }
 @media (prefers-reduced-motion:reduce) { .route-loading__dot,.icone { animation:none !important; }.route-page-react,.auth-overlay * { scroll-behavior:auto; } }
