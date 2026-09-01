@@ -37,8 +37,8 @@ x-aplicacao: &aplicacao
     SEARCH_URL: ${SEARCH_URL:-}
     SESSION_SECRET: ${SESSION_SECRET:?Defina SESSION_SECRET no .env}
     SHIPPING_FIXED_CENTS: ${SHIPPING_FIXED_CENTS:?Defina a política de frete no .env}
-    SMTP_FROM: ${SMTP_FROM:-}
-    SMTP_URL: ${SMTP_URL:-}
+    SMTP_FROM: ${ELITEHUB_SMTP_FROM:-EliteHub Connect <noreply@elitehub.local>}
+    SMTP_URL: ${ELITEHUB_SMTP_URL:-smtp://mailpit:1025}
     STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
@@ -59,6 +59,8 @@ services:
         condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
@@ -74,6 +76,8 @@ services:
         condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
@@ -147,6 +151,11 @@ services:
     environment:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Defina MINIO_ROOT_PASSWORD no .env}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Defina MINIO_ROOT_USER no .env}
+
+  mailpit:
+    image: axllent/mailpit:v1.27.4
+    ports:
+      - "8025:8025"
 
 volumes:
   minio_data:

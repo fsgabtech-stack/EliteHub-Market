@@ -17,8 +17,19 @@ const ambiente = {
 };
 
 async function garantirProntidao() {
-  const response = await fetch(`${baseUrl}/api/v1/ready`);
-  if (!response.ok) throw new Error(`A API do Compose não está pronta: HTTP ${response.status}.`);
+  const limite = Date.now() + 60_000;
+  let ultimoStatus = "sem resposta";
+  while (Date.now() < limite) {
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/ready`);
+      if (response.ok) return;
+      ultimoStatus = `HTTP ${response.status}`;
+    } catch (error) {
+      ultimoStatus = error instanceof Error ? error.name : "erro desconhecido";
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`A API do Compose não ficou pronta em 60 segundos: ${ultimoStatus}.`);
 }
 
 async function executarCompose(servico) {

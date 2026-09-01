@@ -1,5 +1,31 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const mailpitBaseUrl = process.env.ELITEHUB_MAILPIT_BASE_URL ?? "http://localhost:8025";
+
+type MensagemMailpit = { ID: string; To: Array<{ Address: string }> };
+
+async function urlDeConfirmacao(email: string): Promise<string> {
+  const limite = Date.now() + 20_000;
+  while (Date.now() < limite) {
+    const listagem = await fetch(`${mailpitBaseUrl}/api/v1/messages`);
+    if (listagem.ok) {
+      const corpo = await listagem.json() as { messages: MensagemMailpit[] };
+      const mensagem = corpo.messages.find((item) => item.To.some((destinatario) => destinatario.Address === email));
+      if (mensagem) {
+        const detalhe = await fetch(`${mailpitBaseUrl}/api/v1/message/${encodeURIComponent(mensagem.ID)}`);
+        if (detalhe.ok) {
+          const conteudo = await detalhe.json() as { HTML?: string; Text?: string };
+          const origem = `${conteudo.Text ?? ""}\n${conteudo.HTML ?? ""}`;
+          const encontrada = origem.match(/http:\/\/localhost:8001\/static\/confirm-email\.html#token=[A-Za-z0-9_-]+/);
+          if (encontrada?.[0]) return encontrada[0];
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error("A confirmação de e-mail não chegou ao Mailpit no tempo esperado.");
+}
+
 async function idDoProduto(page: Page, busca: string): Promise<string> {
   const response = await page.request.get(`/api/v1/catalog/products?limit=12&q=${encodeURIComponent(busca)}`);
   expect(response.ok()).toBeTruthy();
@@ -14,6 +40,7 @@ async function entrarPeloModal(page: Page, email: string, password: string): Pro
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Senha").fill(password);
   await page.getByRole("button", { exact: true, name: "Entrar" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
 }
 
 test.describe.serial("marketplace no Compose", () => {
@@ -45,6 +72,32 @@ test.describe.serial("marketplace no Compose", () => {
     await expect(page.locator(".quantity-control-react output")).toHaveText("2");
     await page.getByLabel("Diminuir quantidade").click();
     await expect(page.locator(".quantity-control-react output")).toHaveText("1");
+  });
+
+  test("confirma o e-mail por SMTP sandbox e libera a conta real", async ({ page }) => {
+    const email = `confirmacao.e2e.${Date.now()}@elitehub.local`;
+    const senha = "ConfirmacaoEliteHub#2026";
+    await page.goto("/");
+    await page.getByRole("button", { name: "Conta" }).click();
+    await page.getByRole("menuitem", { name: "Criar conta" }).click();
+    await page.getByLabel("Nome completo").fill("Cliente de Confirmação E2E");
+    await page.getByLabel("E-mail").fill(email);
+    await page.getByLabel("Senha").fill(senha);
+    await page.getByRole("button", { name: "Criar conta", exact: true }).click();
+    await expect(page.getByText("Solicitação processada. Você poderá entrar caso a conta tenha sido criada.")).toBeVisible();
+
+    await page.goto(await urlDeConfirmacao(email));
+    await expect(page.locator("#status")).toHaveText("E-mail confirmado. Você já pode voltar à EliteHub Connect.");
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Conta" }).click();
+    await page.getByRole("menuitem", { name: "Entrar" }).click();
+    await page.getByLabel("E-mail").fill(email);
+    await page.getByLabel("Senha").fill(senha);
+    await page.getByRole("button", { name: "Entrar", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.goto("/conta");
+    await expect(page.getByText("E-mail confirmado")).toBeVisible();
   });
 
   test("checkout cria pedido real pendente sem cobrança simulada", async ({ page }) => {

@@ -221,7 +221,10 @@ async function markProcessed(eventId: string): Promise<void> {
 }
 
 async function deferOrDeadLetter(event: OutboxEvent, error: unknown): Promise<void> {
-  const description = error instanceof Error ? error.name : "Erro desconhecido";
+  const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code.slice(0, 64)
+    : undefined;
+  const description = code ? `Código ${code}` : error instanceof Error ? error.name : "Erro desconhecido";
   if (event.attempts >= maxAttempts) {
     await query(
       `UPDATE outbox_events
@@ -229,7 +232,7 @@ async function deferOrDeadLetter(event: OutboxEvent, error: unknown): Promise<vo
         WHERE id = $1`,
       [event.id, description],
     );
-    logger.error({ eventoId: event.id, tipoEvento: event.event_type }, "evento enviado para fila morta");
+    logger.error({ eventoId: event.id, motivo: description, tipoEvento: event.event_type }, "evento enviado para fila morta");
     return;
   }
   const backoffSeconds = Math.min(3_600, 2 ** Math.min(event.attempts, 10));
@@ -241,7 +244,7 @@ async function deferOrDeadLetter(event: OutboxEvent, error: unknown): Promise<vo
       WHERE id = $1`,
     [event.id, String(backoffSeconds), description],
   );
-  logger.warn({ atrasoSegundos: backoffSeconds, eventoId: event.id, tipoEvento: event.event_type }, "evento reagendado");
+  logger.warn({ atrasoSegundos: backoffSeconds, eventoId: event.id, motivo: description, tipoEvento: event.event_type }, "evento reagendado");
 }
 
 async function processBatch(): Promise<number> {
