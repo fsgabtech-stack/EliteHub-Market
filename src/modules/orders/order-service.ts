@@ -10,13 +10,23 @@ import { releasePendingOrderResources } from "../inventory/reservation-service.j
 type OrderRow = {
   buyer_id: string;
   created_at: Date;
+  delivered_at: Date | null;
   id: string;
   order_number: string;
   payment_status: string;
   seller_id: string;
+  shipped_at: Date | null;
+  shipping_carrier: string | null;
+  shipping_cents: number;
+  shipping_estimated_max_business_days: number | null;
+  shipping_estimated_min_business_days: number | null;
+  shipping_service: string;
   status: OrderStatus;
   total_cents: number;
+  tracking_code: string | null;
 };
+
+type ShipmentInput = { carrier: string; trackingCode: string };
 
 function isElevated(user: SessionUser): boolean {
   return user.roles.includes("ADMIN") || user.roles.includes("SUPPORT");
@@ -28,7 +38,9 @@ export async function listOrders(input: { limit: number; offset: number; scope: 
   }
   const condition = input.scope === "received" ? "orders.seller_id = $1" : "orders.buyer_id = $1";
   const result = await query<OrderRow>(
-    `SELECT id, order_number, buyer_id, seller_id, status, payment_status, total_cents, created_at
+    `SELECT id, order_number, buyer_id, seller_id, status, payment_status, total_cents, created_at,
+            shipping_cents, shipping_service, shipping_estimated_min_business_days, shipping_estimated_max_business_days,
+            shipping_carrier, tracking_code, shipped_at, delivered_at
        FROM orders
       WHERE ${condition}
       ORDER BY created_at DESC
@@ -40,6 +52,16 @@ export async function listOrders(input: { limit: number; offset: number; scope: 
     id: order.id,
     number: order.order_number,
     paymentStatus: order.payment_status,
+    shipping: {
+      amountCents: order.shipping_cents,
+      carrier: order.shipping_carrier,
+      deliveredAt: order.delivered_at?.toISOString() ?? null,
+      estimatedMaxBusinessDays: order.shipping_estimated_max_business_days,
+      estimatedMinBusinessDays: order.shipping_estimated_min_business_days,
+      service: order.shipping_service,
+      shippedAt: order.shipped_at?.toISOString() ?? null,
+      trackingCode: order.tracking_code,
+    },
     status: order.status,
     totalCents: order.total_cents,
   }));
@@ -47,7 +69,9 @@ export async function listOrders(input: { limit: number; offset: number; scope: 
 
 export async function getOrder(user: SessionUser, orderId: string) {
   const result = await query<OrderRow>(
-    `SELECT id, order_number, buyer_id, seller_id, status, payment_status, total_cents, created_at
+    `SELECT id, order_number, buyer_id, seller_id, status, payment_status, total_cents, created_at,
+            shipping_cents, shipping_service, shipping_estimated_min_business_days, shipping_estimated_max_business_days,
+            shipping_carrier, tracking_code, shipped_at, delivered_at
        FROM orders WHERE id = $1`,
     [orderId],
   );
@@ -84,6 +108,16 @@ export async function getOrder(user: SessionUser, orderId: string) {
     items: items.rows.map((item) => ({ quantity: item.quantity, title: item.title_snapshot, unitPriceCents: item.unit_price_cents })),
     number: order.order_number,
     paymentStatus: order.payment_status,
+    shipping: {
+      amountCents: order.shipping_cents,
+      carrier: order.shipping_carrier,
+      deliveredAt: order.delivered_at?.toISOString() ?? null,
+      estimatedMaxBusinessDays: order.shipping_estimated_max_business_days,
+      estimatedMinBusinessDays: order.shipping_estimated_min_business_days,
+      service: order.shipping_service,
+      shippedAt: order.shipped_at?.toISOString() ?? null,
+      trackingCode: order.tracking_code,
+    },
     status: order.status,
     statusHistory: history.rows.map((entry) => ({
       createdAt: entry.created_at.toISOString(),
@@ -108,12 +142,15 @@ function canActorSetStatus(user: SessionUser, order: OrderRow, target: OrderStat
 export async function transitionOrderStatus(input: {
   orderId: string;
   reason?: string | undefined;
+  shipment?: ShipmentInput | undefined;
   targetStatus: OrderStatus;
   user: SessionUser;
 }): Promise<{ status: OrderStatus }> {
   return transaction(async (client: PoolClient) => {
     const result = await client.query<OrderRow>(
-      `SELECT id, order_number, buyer_id, seller_id, status, payment_status, total_cents, created_at
+      `SELECT id, order_number, buyer_id, seller_id, status, payment_status, total_cents, created_at,
+              shipping_cents, shipping_service, shipping_estimated_min_business_days, shipping_estimated_max_business_days,
+              shipping_carrier, tracking_code, shipped_at, delivered_at
          FROM orders WHERE id = $1 FOR UPDATE`,
       [input.orderId],
     );
@@ -127,7 +164,29 @@ export async function transitionOrderStatus(input: {
     if (input.targetStatus === "CANCELLED" && (order.status !== "PENDING_PAYMENT" || order.payment_status !== "PENDING")) {
       throw new AppError(409, "CONFLICT");
     }
-    await client.query("UPDATE orders SET status = $2, updated_at = now() WHERE id = $1", [order.id, input.targetStatus]);
+    if (input.targetStatus === "SHIPPED") {
+      if (!input.shipment) {
+        throw new AppError(400, "INVALID_REQUEST");
+      }
+      await client.query(
+        `UPDATE orders
+            SET status = $2, shipping_carrier = $3, tracking_code = $4, shipped_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [order.id, input.targetStatus, input.shipment.carrier, input.shipment.trackingCode],
+      );
+    } else {
+      if (input.shipment) {
+        throw new AppError(400, "INVALID_REQUEST");
+      }
+      await client.query(
+        `UPDATE orders
+            SET status = $2::varchar,
+                delivered_at = CASE WHEN $2::varchar = 'DELIVERED'::varchar THEN now() ELSE delivered_at END,
+                updated_at = now()
+          WHERE id = $1`,
+        [order.id, input.targetStatus],
+      );
+    }
     await client.query(
       `INSERT INTO order_status_history(order_id, from_status, to_status, actor_user_id, reason)
        VALUES ($1, $2, $3, $4, $5)`,

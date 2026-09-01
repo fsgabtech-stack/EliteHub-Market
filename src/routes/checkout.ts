@@ -5,6 +5,7 @@ import { requireAuthenticatedUser, requireVerifiedEmail } from "../http/authoriz
 import { asyncRoute, invalidRequest } from "../http/errors.js";
 import { csrfProtection } from "../http/security.js";
 import { createCheckout } from "../modules/checkout/checkout-service.js";
+import { checkoutOrdersCreatedTotal } from "../observability/metrics.js";
 
 const checkoutSchema = z.object({
   addressId: z.string().uuid(),
@@ -25,6 +26,9 @@ export function registerCheckoutRoutes(router: Router): void {
       const user = await requireAuthenticatedUser(request);
       requireVerifiedEmail(user);
       const checkout = await createCheckout({ ...parsed.data, idempotencyKey: idempotencyKey.data, userId: user.id });
+      if (!checkout.replayed) {
+        checkoutOrdersCreatedTotal.inc({ modo_pagamento: parsed.data.paymentMethod });
+      }
       response.status(checkout.replayed ? 200 : 201).json(checkout.result);
     }),
   );

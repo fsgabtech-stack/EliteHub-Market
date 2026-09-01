@@ -129,6 +129,12 @@ export const documentoOpenApi = {
     "/api/v1/checkout": {
       post: { description: "Reserva estoque, cria pedido pendente de pagamento e publica evento transacional. Em desenvolvimento, um provedor desativado cria somente o pedido pendente, sem cobrança nem confirmação de pagamento; fora desse ambiente a configuração de provedor é obrigatória. Requer Idempotency-Key UUID.", responses: { "201": { description: "Pedido criado" }, "409": { description: "Conflito de estoque, vendedor ou idempotência" }, "503": { description: "Política comercial ou provedor de pagamento indisponível" } }, security: [{ cookieSessao: [] }] },
     },
+    "/api/v1/shipping/quote": {
+      get: { description: "Calcula valor e prazo da política local de entrega por CEP e UF. Não representa cotação de transportadora e não expõe endereço persistido.", responses: { "200": { description: "Cotação de frete" }, "400": { description: "CEP ou UF inválidos" }, "503": { description: "Política de frete indisponível" } } },
+    },
+    "/api/v1/payments/availability": {
+      get: { description: "Informa os meios de pagamento realmente disponíveis no ambiente, sem expor credenciais ou detalhes do provedor.", responses: { "200": { description: "Disponibilidade de pagamento" } } },
+    },
     "/api/v1/orders": {
       get: { description: "Lista pedidos do comprador ou pedidos recebidos do vendedor.", responses: { "200": { description: "Pedidos paginados" } }, security: [{ cookieSessao: [] }] },
     },
@@ -161,6 +167,9 @@ export const documentoOpenApi = {
     },
     "/api/v1/seller/coupons": {
       post: { description: "Cria cupom restrito ao vendedor aprovado.", responses: { "201": { description: "Cupom criado" } }, security: [{ cookieSessao: [] }] },
+    },
+    "/api/v1/admin/operations/summary": {
+      get: { description: "Retorna contagens operacionais agregadas de pedidos, estoque e outbox para administração, sem dados pessoais ou financeiros individuais.", responses: { "200": { description: "Resumo operacional" }, "403": { description: "Acesso administrativo obrigatório" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/admin/categories": {
       post: { description: "Cria categoria administrativa.", responses: { "201": { description: "Categoria criada" } }, security: [{ cookieSessao: [] }] },

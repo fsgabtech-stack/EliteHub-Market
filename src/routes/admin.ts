@@ -43,6 +43,43 @@ const reviewListSchema = z.object({ limit: z.coerce.number().int().min(1).max(10
 
 export function registerAdminRoutes(router: Router): void {
   router.get(
+    "/admin/operations/summary",
+    asyncRoute(async (request, response) => {
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["ADMIN"]);
+      const [orders, inventory, outbox] = await Promise.all([
+        query<{ count: number; status: string }>(
+          "SELECT status, COUNT(*)::integer AS count FROM orders GROUP BY status ORDER BY status ASC",
+        ),
+        query<{ low_stock_products: number; zero_stock_products: number }>(
+          `SELECT COUNT(*) FILTER (WHERE stock_quantity <= 5)::integer AS low_stock_products,
+                  COUNT(*) FILTER (WHERE stock_quantity = 0)::integer AS zero_stock_products
+             FROM products
+            WHERE status = 'ACTIVE' AND deleted_at IS NULL`,
+        ),
+        query<{ dead_lettered: number; pending: number; retrying: number }>(
+          `SELECT COUNT(*) FILTER (WHERE processed_at IS NULL AND dead_lettered_at IS NULL)::integer AS pending,
+                  COUNT(*) FILTER (WHERE processed_at IS NULL AND dead_lettered_at IS NULL AND attempts > 0)::integer AS retrying,
+                  COUNT(*) FILTER (WHERE dead_lettered_at IS NOT NULL)::integer AS dead_lettered
+             FROM outbox_events`,
+        ),
+      ]);
+      response.json({
+        inventory: {
+          lowStockProducts: inventory.rows[0]?.low_stock_products ?? 0,
+          zeroStockProducts: inventory.rows[0]?.zero_stock_products ?? 0,
+        },
+        orders: orders.rows.map((entry) => ({ count: entry.count, status: entry.status })),
+        outbox: {
+          deadLettered: outbox.rows[0]?.dead_lettered ?? 0,
+          pending: outbox.rows[0]?.pending ?? 0,
+          retrying: outbox.rows[0]?.retrying ?? 0,
+        },
+      });
+    }),
+  );
+
+  router.get(
     "/admin/sellers",
     asyncRoute(async (request, response) => {
       const parsed = sellerListSchema.safeParse(request.query);

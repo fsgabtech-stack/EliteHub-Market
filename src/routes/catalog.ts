@@ -103,14 +103,21 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
       const values: unknown[] = [];
       const clauses = ["products.status = 'ACTIVE'", "products.deleted_at IS NULL", "users.deleted_at IS NULL", "seller_profiles.approval_status = 'APPROVED'"];
       let queryTermIndex: number | undefined;
+      let queryPatternIndex: number | undefined;
       if (input.category) {
         values.push(input.category);
         clauses.push(`products.category_id = $${values.length}`);
       }
       if (input.q) {
-        values.push(`%${input.q.replace(/[\\%_]/g, "\\$&")}%`);
+        values.push(input.q);
         queryTermIndex = values.length;
-        clauses.push(`(products.title ILIKE $${values.length} ESCAPE '\\' OR products.description ILIKE $${values.length} ESCAPE '\\')`);
+        values.push(`%${input.q.replace(/[\\%_]/g, "\\$&")}%`);
+        queryPatternIndex = values.length;
+        clauses.push(`(
+          products.search_document @@ websearch_to_tsquery('portuguese', $${queryTermIndex})
+          OR products.title ILIKE $${queryPatternIndex} ESCAPE '\\'
+          OR products.description ILIKE $${queryPatternIndex} ESCAPE '\\'
+        )`);
       }
       if (input.seller) {
         values.push(input.seller);
@@ -128,8 +135,10 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
         ? "products.price_cents ASC, products.created_at DESC"
         : input.sort === "price_desc"
           ? "products.price_cents DESC, products.created_at DESC"
-          : input.sort === "relevance" && queryTermIndex
-            ? `CASE WHEN products.title ILIKE $${queryTermIndex} ESCAPE '\\' THEN 0 ELSE 1 END, products.created_at DESC`
+          : input.sort === "relevance" && queryTermIndex && queryPatternIndex
+            ? `ts_rank(products.search_document, websearch_to_tsquery('portuguese', $${queryTermIndex})) DESC,
+               CASE WHEN products.title ILIKE $${queryPatternIndex} ESCAPE '\\' THEN 0 ELSE 1 END,
+               products.created_at DESC`
             : "products.created_at DESC";
       const totals = await query<{ total: number }>(
         `SELECT COUNT(*)::integer AS total
@@ -194,10 +203,14 @@ export function registerCatalogRoutes(router: Router, prefix = ""): void {
            JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
              AND seller_profiles.approval_status = 'APPROVED'
           WHERE products.status = 'ACTIVE' AND products.deleted_at IS NULL
-            AND products.title ILIKE $1 ESCAPE '\\'
-          ORDER BY products.created_at DESC
+            AND (
+              products.search_document @@ websearch_to_tsquery('portuguese', $1)
+              OR products.title ILIKE $2 ESCAPE '\\'
+            )
+          ORDER BY ts_rank(products.search_document, websearch_to_tsquery('portuguese', $1)) DESC,
+                   products.created_at DESC
           LIMIT 8`,
-        [pattern],
+        [parsed.data.q, pattern],
       );
       response.json({ items: products.rows.map((product) => ({ id: product.id, label: product.title, type: "PRODUCT" })) });
     }),

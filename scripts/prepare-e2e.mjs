@@ -41,8 +41,18 @@ async function executarCompose(servico) {
   if (resultado.stderr) process.stderr.write(resultado.stderr);
 }
 
+async function construirFerramentasE2E() {
+  const resultado = await executar(docker, ["compose", "--profile", "ferramentas", "build", "reset", "seed"], {
+    cwd: process.cwd(),
+    env: ambiente,
+  });
+  if (resultado.stdout) process.stdout.write(resultado.stdout);
+  if (resultado.stderr) process.stderr.write(resultado.stderr);
+}
+
 export default async function prepararE2E() {
   await garantirProntidao();
+  await construirFerramentasE2E();
   await executarCompose("reset");
   await executarCompose("seed");
   await garantirProntidao();

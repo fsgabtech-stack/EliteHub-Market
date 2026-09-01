@@ -27,9 +27,11 @@ import { registerFavoriteRoutes } from "./routes/favorites.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerOrderRoutes } from "./routes/orders.js";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.js";
+import { registerPaymentRoutes } from "./routes/payments.js";
 import { registerPublicSellerRoutes } from "./routes/public-sellers.js";
 import { registerReviewRoutes } from "./routes/reviews.js";
 import { registerSellerRoutes } from "./routes/seller.js";
+import { registerShippingRoutes } from "./routes/shipping.js";
 
 function validMetricsAuthorization(value: string | undefined): boolean {
   if (!config.isProduction) {
@@ -98,6 +100,7 @@ export function criarAplicacao(): express.Express {
   registerCatalogRoutes(api);
   registerCatalogRoutes(api, "/catalog");
   registerPublicSellerRoutes(api);
+  registerShippingRoutes(api);
   registerReviewRoutes(api);
   registerAccountRoutes(api);
   registerAddressRoutes(api);
@@ -106,6 +109,7 @@ export function criarAplicacao(): express.Express {
   registerFileRoutes(api);
   registerFavoriteRoutes(api);
   registerNotificationRoutes(api);
+  registerPaymentRoutes(api);
   registerOrderRoutes(api);
   registerSellerRoutes(api);
   registerAdminRoutes(api);

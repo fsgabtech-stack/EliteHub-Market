@@ -269,6 +269,37 @@ async function ensureHistoricalOrder(
   );
 }
 
+async function ensureFulfillmentOrder(
+  client: import("pg").PoolClient,
+  customerId: string,
+  sellerId: string,
+  addressId: string,
+  productId: string,
+  product: SeedProduct,
+): Promise<void> {
+  const number = "EH-DEV-ENVIO-0001";
+  const existing = await client.query<{ id: string }>("SELECT id FROM orders WHERE order_number = $1 FOR UPDATE", [number]);
+  const order = existing.rows[0] ?? (await client.query<{ id: string }>(
+    `INSERT INTO orders(order_number, buyer_id, seller_id, address_id, status, payment_status, subtotal_cents, shipping_cents, discount_cents, total_cents)
+     VALUES ($1, $2, $3, $4, 'PAID', 'APPROVED', $5, 0, 0, $5)
+     RETURNING id`,
+    [number, customerId, sellerId, addressId, product.priceCents],
+  )).rows[0];
+  if (!order) throw new Error("Não foi possível criar o pedido de envio de desenvolvimento.");
+  await client.query(
+    `INSERT INTO order_items(order_id, product_id, variant_id, title_snapshot, unit_price_cents, quantity)
+     SELECT $1, $2, NULL, $3, $4, 1
+      WHERE NOT EXISTS (SELECT 1 FROM order_items WHERE order_id = $1 AND product_id = $2)`,
+    [order.id, productId, product.title, product.priceCents],
+  );
+  await client.query(
+    `INSERT INTO order_status_history(order_id, from_status, to_status, actor_user_id, reason)
+     SELECT $1, NULL, 'PAID', $2, 'Pedido local aprovado para validar o fluxo de envio do vendedor'
+      WHERE NOT EXISTS (SELECT 1 FROM order_status_history WHERE order_id = $1)`,
+    [order.id, customerId],
+  );
+}
+
 async function ensureCoupon(client: import("pg").PoolClient, adminId: string): Promise<void> {
   const updated = await client.query<{ id: string }>(
     `UPDATE coupons
@@ -326,6 +357,7 @@ async function seed(): Promise<void> {
     if (!historicalProduct || !historicalProductId) throw new Error("Produto histórico de desenvolvimento ausente.");
     const addressId = await ensureAddress(client, customerId);
     await ensureHistoricalOrder(client, customerId, sellerId, addressId, historicalProductId, historicalProduct);
+    await ensureFulfillmentOrder(client, customerId, sellerId, addressId, historicalProductId, historicalProduct);
     await ensureCoupon(client, adminId);
   });
   console.log("Seed de desenvolvimento concluída com contas, catálogo, estoque e dados de moderação locais.");

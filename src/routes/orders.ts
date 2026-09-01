@@ -6,6 +6,7 @@ import { assertOrderStatus } from "../domain/orders/order-status.js";
 import { asyncRoute, invalidRequest } from "../http/errors.js";
 import { csrfProtection } from "../http/security.js";
 import { getOrder, listOrders, transitionOrderStatus } from "../modules/orders/order-service.js";
+import { orderStatusTransitionsTotal } from "../observability/metrics.js";
 
 const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -15,6 +16,10 @@ const listSchema = z.object({
 
 const transitionSchema = z.object({
   reason: z.string().trim().min(3).max(300).optional(),
+  shipment: z.object({
+    carrier: z.string().trim().min(2).max(120),
+    trackingCode: z.string().trim().min(4).max(120),
+  }).optional(),
   status: z.string(),
 });
 
@@ -56,12 +61,20 @@ export function registerOrderRoutes(router: Router): void {
       } catch {
         throw invalidRequest();
       }
+      const user = await requireAuthenticatedUser(request);
       const result = await transitionOrderStatus({
         orderId: id.data,
         reason: parsed.data.reason,
+        shipment: parsed.data.shipment,
         targetStatus: parsed.data.status,
-        user: await requireAuthenticatedUser(request),
+        user,
       });
+      const actor = user.roles.includes("ADMIN") || user.roles.includes("SUPPORT")
+        ? "OPERACAO"
+        : user.roles.includes("SELLER")
+          ? "VENDEDOR"
+          : "CLIENTE";
+      orderStatusTransitionsTotal.inc({ ator: actor, destino: result.status });
       response.json(result);
     }),
   );

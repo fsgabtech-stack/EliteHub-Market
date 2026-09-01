@@ -7,6 +7,8 @@ import { calculateOrderTotal, calculatePercentageDiscount } from "../../domain/c
 import { transaction } from "../../db/pool.js";
 import { AppError } from "../../http/errors.js";
 import { enqueueDomainEvent } from "../events/outbox.js";
+import { paymentMethodAvailable, paymentProviderReady } from "../payments/payment-availability.js";
+import { cotarFrete } from "../shipping/shipping-service.js";
 
 type CheckoutItemRow = {
   product_id: string;
@@ -43,6 +45,12 @@ export type CheckoutResult = {
   };
   payment: {
     integrationPending: boolean;
+  };
+  shipping: {
+    amountCents: number;
+    estimatedMaxBusinessDays: number;
+    estimatedMinBusinessDays: number;
+    service: string;
   };
 };
 
@@ -122,11 +130,13 @@ export type CheckoutInput = {
 };
 
 export async function createCheckout(input: CheckoutInput): Promise<{ replayed: boolean; result: CheckoutResult }> {
-  const shippingCents = config.shipping.fixedCents;
-  if (shippingCents === undefined || config.payments.commissionBasisPoints === undefined) {
+  if (config.payments.commissionBasisPoints === undefined) {
     throw new AppError(503, "CHECKOUT_UNAVAILABLE");
   }
-  const paymentProviderConfigured = config.payments.provider === "mercado_pago" || config.payments.provider === "stripe";
+  if (!paymentMethodAvailable(input.paymentMethod)) {
+    throw new AppError(503, "PAYMENT_CONFIGURATION_UNAVAILABLE");
+  }
+  const paymentProviderConfigured = paymentProviderReady();
   if (!paymentProviderConfigured && config.nodeEnv !== "development") {
     throw new AppError(503, "PAYMENT_CONFIGURATION_UNAVAILABLE");
   }
@@ -141,13 +151,14 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
     if (replay) {
       return { replayed: true, result: replay };
     }
-    const address = await client.query<{ id: string }>(
-      "SELECT id FROM addresses WHERE id = $1 AND user_id = $2 FOR KEY SHARE",
+    const address = await client.query<{ id: string; postal_code: string; state: string }>(
+      "SELECT id, postal_code, state FROM addresses WHERE id = $1 AND user_id = $2 FOR KEY SHARE",
       [input.addressId, input.userId],
     );
     if (!address.rows[0]) {
       throw new AppError(404, "NOT_FOUND");
     }
+    const shipping = cotarFrete({ postalCode: address.rows[0].postal_code, state: address.rows[0].state });
     const cart = await client.query<{ id: string }>(
       `SELECT id FROM carts
         WHERE user_id = $1 AND status = 'ACTIVE'
@@ -195,14 +206,28 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
     }
     const subtotalCents = items.rows.reduce((sum, item) => sum + item.unit_price_cents * item.quantity, 0);
     const { coupon, discountCents } = await loadCoupon(client, input.couponCode, sellerId, subtotalCents);
-    const totalCents = calculateOrderTotal(subtotalCents, shippingCents, discountCents);
+    const totalCents = calculateOrderTotal(subtotalCents, shipping.amountCents, discountCents);
     const orderNumber = newOrderNumber();
     const createdOrder = await client.query<{ id: string }>(
       `INSERT INTO orders(order_number, buyer_id, seller_id, address_id, status, payment_status,
-                          subtotal_cents, shipping_cents, discount_cents, total_cents, coupon_id)
-       VALUES ($1, $2, $3, $4, 'PENDING_PAYMENT', 'PENDING', $5, $6, $7, $8, $9)
+                          subtotal_cents, shipping_cents, discount_cents, total_cents, coupon_id,
+                          shipping_service, shipping_estimated_min_business_days, shipping_estimated_max_business_days)
+       VALUES ($1, $2, $3, $4, 'PENDING_PAYMENT', 'PENDING', $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
-      [orderNumber, input.userId, sellerId, input.addressId, subtotalCents, shippingCents, discountCents, totalCents, coupon?.id ?? null],
+      [
+        orderNumber,
+        input.userId,
+        sellerId,
+        input.addressId,
+        subtotalCents,
+        shipping.amountCents,
+        discountCents,
+        totalCents,
+        coupon?.id ?? null,
+        shipping.service,
+        shipping.estimatedMinBusinessDays,
+        shipping.estimatedMaxBusinessDays,
+      ],
     );
     const order = createdOrder.rows[0];
     if (!order) {
@@ -295,6 +320,12 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
     const result: CheckoutResult = {
       order: { id: orderId, number: orderNumber, paymentStatus: "PENDING", status: "PENDING_PAYMENT", totalCents },
       payment: { integrationPending: !paymentProviderConfigured },
+      shipping: {
+        amountCents: shipping.amountCents,
+        estimatedMaxBusinessDays: shipping.estimatedMaxBusinessDays,
+        estimatedMinBusinessDays: shipping.estimatedMinBusinessDays,
+        service: shipping.service,
+      },
     };
     await client.query(
       `INSERT INTO idempotency_records(user_id, operation, idempotency_key, request_hash, response_status, response_body)

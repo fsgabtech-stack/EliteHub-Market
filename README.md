@@ -32,6 +32,12 @@ Implementado no código:
 - favoritos e notificações persistentes por usuário, acessíveis apenas após autenticação.
 - avaliações vinculadas a compras entregues, com moderação, auditoria, reputação pública agregada e identidade do comprador minimizada.
 
+- cotação local de frete por CEP e UF, com valor configurado e prazo regional, persistida como snapshot no pedido; ela não se apresenta como integração de transportadora;
+- disponibilidade de pagamento consultada pela interface a partir da API, com Pix local reservado somente em desenvolvimento e cartão/boleto desabilitados até haver adaptador PCI aprovado;
+- despacho de pedido pelo vendedor com transportadora, rastreio, histórico, auditoria, evento de notificação e autorização no servidor;
+- busca textual em português indexada no PostgreSQL e filtros compartilháveis pela URL;
+- resumo administrativo agregado de pedidos, estoque crítico e outbox, protegido por RBAC e sem dados individuais.
+
 Não são afirmados como ativos sem configuração externa e teste real:
 
 - Google OAuth, Mercado Pago, Stripe, MinIO/S3, Redis e OpenSearch;
@@ -160,12 +166,12 @@ Rotas centrais:
 | Descoberta pública | `/api/v1/catalog/search-suggestions`, `/api/v1/sellers/:id`, `/api/v1/files/:id` para imagens de produto |
 | Avaliações | `GET/POST /api/v1/products/:id/reviews`, `PATCH /api/v1/admin/reviews/:id` |
 | Carrinho | `/api/v1/cart`, `/api/v1/cart/items` |
-| Endereços e checkout | `/api/v1/addresses`, `/api/v1/checkout` |
+| Entrega, checkout e pagamentos | `/api/v1/addresses`, `/api/v1/shipping/quote`, `/api/v1/payments/availability`, `/api/v1/checkout` |
 | Conta e LGPD | `/api/v1/account/consents`, `/data-export`, `/deletion` |
 | Favoritos e notificações | `/api/v1/favorites`, `/api/v1/favorites/:productId`, `/api/v1/notifications` |
 | Pedidos | `/api/v1/orders`, `/api/v1/orders/:id`, `/api/v1/orders/:id/status` |
 | Vendedores | `/api/v1/seller/onboarding`, `/api/v1/seller/products`, `/api/v1/seller/products/:id/stock-adjustments` |
-| Administração | `/api/v1/admin/categories`, `/api/v1/admin/sellers`, `/api/v1/admin/sellers/:id/approval`, `/api/v1/admin/reviews`, `/api/v1/admin/reviews/:id`, `/api/v1/admin/coupons` |
+| Administração | `/api/v1/admin/operations/summary`, `/api/v1/admin/categories`, `/api/v1/admin/sellers`, `/api/v1/admin/sellers/:id/approval`, `/api/v1/admin/reviews`, `/api/v1/admin/reviews/:id`, `/api/v1/admin/coupons` |
 | Arquivos | `/api/v1/seller/products/:id/images`, `/api/v1/files/:id` |
 | Webhooks | `/api/v1/payments/webhooks/mercado-pago`, `/api/v1/payments/webhooks/stripe` |
 
@@ -173,9 +179,17 @@ Operações de escrita autenticadas por cookie exigem `X-CSRF-Token`, obtido em 
 
 Em produção, `GET /metrics` exige `Authorization: Bearer <METRICS_BEARER_TOKEN>`. Configure `TRUST_PROXY_HOPS` para a quantidade real de proxies confiáveis; usar valor maior que a topologia real permite falsificar IP e enfraquece o rate limiting.
 
+## Frete, entrega e catálogo
+
+`GET /api/v1/shipping/quote?postalCode=<CEP>&state=<UF>` é público e calcula a política local de entrega por região. O CEP precisa ter oito dígitos e a UF precisa ser válida. A política usa `SHIPPING_FIXED_CENTS` e prazos regionais; o checkout ignora qualquer total de frete vindo do navegador, consulta o endereço pertencente à sessão e grava serviço, valor e prazo no pedido. A rota não consulta Correios, Melhor Envio ou qualquer transportadora externa.
+
+O vendedor só pode avançar um pedido pago para separação, envio e entrega quando for o proprietário da venda. A transição para `SHIPPED` exige transportadora e código de rastreio validados no backend. O cliente vê o rastreio, mas não pode alterar o fluxo de fulfillment.
+
+O catálogo mantém um documento `tsvector` em português e índice GIN no PostgreSQL. A busca combina esse índice com correspondência parcial segura para siglas e trechos curtos. Categoria, ordenação, faixa de preço e página são mantidas na URL para atualização, retorno do navegador e compartilhamento sem estado oculto no cliente.
+
 ## Pagamentos e webhooks
 
-`PAYMENT_PROVIDER` aceita `mercado_pago`, `stripe` ou `disabled`. A ativação só é permitida com sandbox e política comercial explícita. O checkout não é liberado sem configuração de frete e comissão, evitando cobranças sem total financeiro aprovado. Com o provedor `disabled`, somente `NODE_ENV=development` pode criar um pedido real em `PENDING_PAYMENT`, reservar estoque e registrar auditoria; nenhuma cobrança, transação de pagamento ou aprovação é simulada. Em qualquer outro ambiente, o checkout continua recusado até que exista um provedor sandbox configurado.
+`PAYMENT_PROVIDER` aceita `mercado_pago`, `stripe` ou `disabled`. A ativação só é permitida com sandbox, política comercial explícita e as duas credenciais sandbox do provedor: chave de API e segredo de webhook. A interface consulta `GET /api/v1/payments/availability` antes de permitir a escolha; o servidor rejeita qualquer método indisponível, mesmo se for enviado manualmente. O checkout não é liberado sem configuração de frete e comissão, evitando cobranças sem total financeiro aprovado. Com o provedor `disabled`, somente `NODE_ENV=development` pode criar um pedido real em `PENDING_PAYMENT`, reservar estoque e registrar auditoria; nenhuma cobrança, transação de pagamento ou aprovação é simulada. Em qualquer outro ambiente, o checkout continua recusado até que exista um provedor sandbox configurado de forma completa.
 
 O webhook:
 
@@ -211,7 +225,7 @@ npm run build
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run test:e2e` usa Playwright contra o Compose real: navegador → React entregue pelo Express → API Node → PostgreSQL. Instale o navegador uma única vez com `npx playwright install chromium`. A preparação aguarda a prontidão da API, faz reset seguro do ambiente de desenvolvimento e reaplica a seed determinística. Testes de integração com PostgreSQL, Redis e MinIO dependem de Docker ou de serviços locais configurados. Não considere a aplicação persistente funcional enquanto `npm run db:migrate` não terminar com sucesso e `GET /api/v1/ready` não retornar `200`.
+`npm run test:e2e` usa Playwright contra o Compose real: navegador → React entregue pelo Express → API Node → PostgreSQL. Instale o navegador uma única vez com `npx playwright install chromium`. A preparação aguarda a prontidão da API, reconstrói as imagens de `seed` e `reset`, faz reset seguro do ambiente de desenvolvimento e reaplica a seed determinística. Testes de integração com PostgreSQL, Redis e MinIO dependem de Docker ou de serviços locais configurados. Não considere a aplicação persistente funcional enquanto `npm run db:migrate` não terminar com sucesso e `GET /api/v1/ready` não retornar `200`.
 
 O workflow do GitHub Actions executa lint, tipo, testes unitários e de interface, OpenAPI, build, auditoria de dependências, imagem Docker e a suíte Playwright em um Compose efêmero com valores exclusivos de CI. Esses valores não são credenciais reutilizáveis de staging ou produção.
 

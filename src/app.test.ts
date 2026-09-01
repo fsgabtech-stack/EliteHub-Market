@@ -81,6 +81,24 @@ test("informa a disponibilidade real dos provedores de autenticação", async ()
   });
 });
 
+test("expõe somente meios de pagamento realmente disponíveis para visitantes", async () => {
+  await withApplication(async (origin) => {
+    const response = await fetch(`${origin}/api/v1/payments/availability`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as { methods: Array<{ available: boolean; code: string }> };
+    assert.ok(body.methods.some((method) => method.code === "PIX"));
+    assert.equal(body.methods.find((method) => method.code === "CREDIT_CARD")?.available, false);
+    assert.equal(body.methods.find((method) => method.code === "BOLETO")?.available, false);
+  });
+});
+
+test("recusa consulta de frete com CEP ou UF inválidos", async () => {
+  await withApplication(async (origin) => {
+    const response = await fetch(`${origin}/api/v1/shipping/quote?postalCode=invalido&state=sp`);
+    assert.equal(response.status, 400);
+  });
+});
+
 test("permite consultar o catálogo publicamente quando a persistência está disponível", { skip: !config.databaseUrl }, async () => {
   await withApplication(async (origin) => {
     const response = await fetch(`${origin}/api/v1/catalog/products?limit=1`);

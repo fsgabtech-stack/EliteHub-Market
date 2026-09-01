@@ -10,6 +10,9 @@ const requiredPaths = [
   "/api/v1/notifications",
   "/api/v1/cart",
   "/api/v1/checkout",
+  "/api/v1/shipping/quote",
+  "/api/v1/payments/availability",
+  "/api/v1/admin/operations/summary",
   "/api/v1/admin/reviews/{id}",
   "/api/v1/payments/webhooks/{provedor}",
 ];
