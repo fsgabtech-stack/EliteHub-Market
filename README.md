@@ -34,7 +34,7 @@ Implementado no código:
 
 Não são afirmados como ativos sem configuração externa e teste real:
 
-- Google OAuth, SMTP, Mercado Pago, Stripe, MinIO/S3, Redis e OpenSearch;
+- Google OAuth, Mercado Pago, Stripe, MinIO/S3, Redis e OpenSearch;
 - cálculo de frete por transportadora, pois não existe política comercial nem credencial de cotação aprovada;
 - pagamento com cartão ou boleto: o backend não recebe PAN/CVV e exige um fluxo PCI do provedor antes de ativação;
 - qualquer ambiente de staging ou produção.
@@ -117,6 +117,8 @@ A interface React estará em [http://localhost:8001](http://localhost:8001). Ap�
 
 O serviço `migrate` é executado antes da API e do worker; acompanhe-o com `docker compose logs migrate`. Não aplique manualmente uma migração em paralelo ao Compose.
 
+O Compose também inicia o Mailpit, um coletor SMTP descartável para desenvolvimento, em [http://localhost:8025](http://localhost:8025). O fluxo de cadastro gera um token opaco de uso único, o worker envia a mensagem somente para o Mailpit local e a confirmação é concluída pela página do link. Não configure `ELITEHUB_SMTP_URL` ou `ELITEHUB_SMTP_FROM` com um serviço externo sem aprovação operacional. O Mailpit não é um serviço de staging nem de produção.
+
 ### Dados locais de desenvolvimento
 
 A seed não é executada automaticamente. Ela exige simultaneamente `NODE_ENV=development` e `ELITEHUB_DEVELOPMENT_SEED=enabled`; fora desse contexto ela falha antes de gravar no banco. No Compose, execute-a explicitamente:
@@ -179,12 +181,22 @@ O webhook:
 
 1. recebe o corpo bruto antes do parser JSON;
 2. valida assinatura e janela temporal;
-3. grava recibo idempotente e auditável;
+3. grava recibo idempotente e auditável, com concessão temporária de processamento para impedir duplicidade concorrente;
 4. consulta o estado diretamente no provedor;
 5. atualiza pagamento, pedido, reserva e ledger em transação;
 6. publica eventos de pagamento e notificação.
 
 Não existe endpoint que marque pagamento aprovado a partir do navegador.
+
+Uma entrega repetida de evento já concluído recebe `202` com `replayed: true` e não executa novamente o processamento. Uma entrega concorrente enquanto a concessão está ativa também recebe `202` sem iniciar processamento duplicado; após cinco minutos, uma nova entrega pode recuperar a concessão. Em caso de falha, a concessão é liberada e o provedor pode reenviar o mesmo evento. Os testes de API validam repetição e concorrência Stripe assinadas com recibos persistidos no PostgreSQL, sem contato com serviço externo.
+
+## Integrações externas e promoção de ambiente
+
+O Google OAuth está implementado com PKCE, `state`, `nonce`, validação de `id_token` e vinculação transacional da identidade. Ele permanece desativado até que um projeto **sandbox** do Google Cloud forneça `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`, com a URL de retorno exata `http://localhost:8001/api/v1/auth/google/callback` cadastrada. Microsoft continua exibido como indisponível: não há adaptador OAuth equivalente implementado nem credenciais aprovadas.
+
+Mercado Pago e Stripe têm adaptadores de PIX, idempotência, consulta autoritativa no provedor, recibos de webhook e verificação de assinatura. A execução fim a fim contra qualquer um deles depende de três decisões externas: provedor escolhido, credenciais sandbox e regras financeiras aprovadas para frete, comissão e split. Sem esses elementos, `PAYMENT_PROVIDER=disabled` é obrigatório; pedidos locais ficam em `PENDING_PAYMENT` e nenhuma cobrança é criada.
+
+Antes de staging, exija domínio dedicado, TLS válido, secret manager, variáveis exclusivas do ambiente, banco e bucket isolados, e uma URL HTTPS de webhook registrada no provedor sandbox. Produção só pode ser promovida após evidência desses testes em staging e aprovação operacional e financeira. Este repositório não cria recursos pagos, não grava credenciais externas e não publica webhooks na internet.
 
 ## Qualidade
 
@@ -199,7 +211,9 @@ npm run build
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run test:e2e` usa Playwright contra o Compose real: navegador → React entregue pelo Express → API Node → PostgreSQL. Instale o navegador uma única vez com `npx playwright install chromium`. Testes de integração com PostgreSQL, Redis e MinIO dependem de Docker ou de serviços locais configurados. Não considere a aplicação persistente funcional enquanto `npm run db:migrate` não terminar com sucesso e `GET /api/v1/ready` não retornar `200`.
+`npm run test:e2e` usa Playwright contra o Compose real: navegador → React entregue pelo Express → API Node → PostgreSQL. Instale o navegador uma única vez com `npx playwright install chromium`. A preparação aguarda a prontidão da API, faz reset seguro do ambiente de desenvolvimento e reaplica a seed determinística. Testes de integração com PostgreSQL, Redis e MinIO dependem de Docker ou de serviços locais configurados. Não considere a aplicação persistente funcional enquanto `npm run db:migrate` não terminar com sucesso e `GET /api/v1/ready` não retornar `200`.
+
+O workflow do GitHub Actions executa lint, tipo, testes unitários e de interface, OpenAPI, build, auditoria de dependências, imagem Docker e a suíte Playwright em um Compose efêmero com valores exclusivos de CI. Esses valores não são credenciais reutilizáveis de staging ou produção.
 
 ## Operação e segurança
 
