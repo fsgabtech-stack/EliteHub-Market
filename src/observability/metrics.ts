@@ -31,3 +31,17 @@ export const shippingQuotesTotal = new Counter({
   name: "elitehub_frete_cotacoes_total",
   registers: [metricRegistry],
 });
+
+export const afterSalesRequestsTotal = new Counter({
+  help: "Total de solicitações de pós-venda abertas pelo cliente por tipo.",
+  labelNames: ["tipo"] as const,
+  name: "elitehub_pos_venda_solicitacoes_total",
+  registers: [metricRegistry],
+});
+
+export const afterSalesTransitionsTotal = new Counter({
+  help: "Total de transições do fluxo de pós-venda por ator e destino.",
+  labelNames: ["ator", "destino"] as const,
+  name: "elitehub_pos_venda_transicoes_total",
+  registers: [metricRegistry],
+});

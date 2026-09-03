@@ -35,6 +35,12 @@ const variantSchema = z.object({
   stockQuantity: z.number().int().min(0).max(10_000_000),
 });
 
+const sellerProductListSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+  status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]).optional(),
+});
+
 async function requireApprovedSeller(userId: string): Promise<void> {
   const profile = await query<{ approval_status: string }>(
     "SELECT approval_status FROM seller_profiles WHERE user_id = $1",
@@ -46,6 +52,90 @@ async function requireApprovedSeller(userId: string): Promise<void> {
 }
 
 export function registerSellerRoutes(router: Router): void {
+  router.get(
+    "/seller/products",
+    asyncRoute(async (request, response) => {
+      const parsed = sellerProductListSchema.safeParse(request.query);
+      if (!parsed.success) throw invalidRequest();
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["SELLER"]);
+      const values: unknown[] = [user.id];
+      const statusCondition = parsed.data.status
+        ? (values.push(parsed.data.status), `AND products.status = $${values.length}`)
+        : "";
+      values.push(parsed.data.limit, parsed.data.offset);
+      const products = await query<{
+        attributes: Record<string, unknown>;
+        category_id: string | null;
+        category_name: string | null;
+        description: string;
+        id: string;
+        image_asset_id: string | null;
+        price_cents: number;
+        sku: string | null;
+        status: "ACTIVE" | "ARCHIVED" | "DRAFT" | "PAUSED";
+        stock_quantity: number;
+        title: string;
+      }>(
+        `SELECT products.id, products.title, products.description, products.price_cents, products.stock_quantity,
+                products.status, products.sku, products.attributes, products.category_id, categories.name AS category_name,
+                (
+                  SELECT product_images.asset_id
+                    FROM product_images
+                   WHERE product_images.product_id = products.id
+                   ORDER BY product_images.sort_order ASC
+                   LIMIT 1
+                ) AS image_asset_id
+           FROM products
+           LEFT JOIN categories ON categories.id = products.category_id
+          WHERE products.seller_id = $1 AND products.deleted_at IS NULL ${statusCondition}
+          ORDER BY products.updated_at DESC
+          LIMIT $${values.length - 1} OFFSET $${values.length}`,
+        values,
+      );
+      const ids = products.rows.map((product) => product.id);
+      const variants = ids.length
+        ? await query<{
+          attributes: Record<string, unknown>;
+          id: string;
+          price_cents: number | null;
+          product_id: string;
+          sku: string | null;
+          stock_quantity: number;
+        }>(
+          `SELECT id, product_id, sku, attributes, price_cents, stock_quantity
+             FROM product_variants
+            WHERE product_id = ANY($1::uuid[])
+            ORDER BY created_at ASC`,
+          [ids],
+        )
+        : { rows: [] };
+      const variantsByProduct = new Map<string, typeof variants.rows>();
+      for (const variant of variants.rows) variantsByProduct.set(variant.product_id, [...(variantsByProduct.get(variant.product_id) ?? []), variant]);
+      response.json({
+        items: products.rows.map((product) => ({
+          attributes: product.attributes,
+          category: product.category_id ? { id: product.category_id, name: product.category_name ?? "Sem categoria" } : null,
+          description: product.description,
+          id: product.id,
+          imageUrl: product.image_asset_id ? `/api/v1/files/${product.image_asset_id}` : null,
+          priceCents: product.price_cents,
+          sku: product.sku,
+          status: product.status,
+          stockQuantity: product.stock_quantity,
+          title: product.title,
+          variants: (variantsByProduct.get(product.id) ?? []).map((variant) => ({
+            attributes: variant.attributes,
+            id: variant.id,
+            priceCents: variant.price_cents,
+            sku: variant.sku,
+            stockQuantity: variant.stock_quantity,
+          })),
+        })),
+      });
+    }),
+  );
+
   router.get(
     "/seller/profile",
     asyncRoute(async (request, response) => {

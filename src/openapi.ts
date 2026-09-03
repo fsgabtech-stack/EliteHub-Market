@@ -144,6 +144,15 @@ export const documentoOpenApi = {
     "/api/v1/orders/{id}/status": {
       post: { description: "Executa transição válida de status conforme posse e papel.", responses: { "200": { description: "Status atualizado" }, "409": { description: "Transição inválida" } }, security: [{ cookieSessao: [] }] },
     },
+    "/api/v1/orders/{id}/after-sales-requests": {
+      post: { description: "Abre solicitação persistente de cancelamento após pagamento ou devolução após entrega. O fluxo é auditável e não simula reembolso de provedor.", responses: { "201": { description: "Solicitação de pós-venda criada" }, "401": { description: "Sessão ausente ou expirada" }, "409": { description: "Pedido incompatível ou solicitação já aberta" } }, security: [{ cookieSessao: [] }] },
+    },
+    "/api/v1/after-sales": {
+      get: { description: "Lista solicitações de pós-venda do cliente, vendedor proprietário ou fila de operação, conforme a sessão e o escopo autorizado.", responses: { "200": { description: "Solicitações persistentes" }, "401": { description: "Sessão ausente ou expirada" }, "403": { description: "Escopo não autorizado" } }, security: [{ cookieSessao: [] }] },
+    },
+    "/api/v1/after-sales/{id}": {
+      patch: { description: "Avança solicitação de pós-venda conforme autorização. O reembolso final continua dependente de confirmação financeira autorizada.", responses: { "200": { description: "Situação atualizada" }, "401": { description: "Sessão ausente ou expirada" }, "409": { description: "Transição não permitida" } }, security: [{ cookieSessao: [] }] },
+    },
     "/api/v1/seller/profile": {
       get: { description: "Consulta o perfil e a situação de aprovação do vendedor autenticado.", responses: { "200": { description: "Perfil do vendedor" } }, security: [{ cookieSessao: [] }] },
     },
@@ -151,6 +160,7 @@ export const documentoOpenApi = {
       post: { description: "Submete ou atualiza o onboarding de vendedor para aprovação administrativa.", responses: { "202": { description: "Onboarding recebido" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/seller/products": {
+      get: { description: "Lista produtos do próprio vendedor, inclusive rascunhos, pausados, estoque e variações. Nunca expõe produtos de outro vendedor.", responses: { "200": { description: "Produtos da loja" }, "401": { description: "Sessão ausente ou expirada" }, "403": { description: "Função de vendedor exigida" } }, security: [{ cookieSessao: [] }] },
       post: { description: "Cria produto pertencente a vendedor aprovado.", responses: { "201": { description: "Produto criado" }, "403": { description: "Vendedor não aprovado" } }, security: [{ cookieSessao: [] }] },
     },
     "/api/v1/seller/products/{id}": {

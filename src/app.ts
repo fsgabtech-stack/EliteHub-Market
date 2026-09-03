@@ -19,6 +19,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAddressRoutes } from "./routes/addresses.js";
 import { registerAccountRoutes } from "./routes/account.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerAfterSalesRoutes } from "./routes/after-sales.js";
 import { registerCatalogRoutes } from "./routes/catalog.js";
 import { registerCartRoutes } from "./routes/cart.js";
 import { registerCheckoutRoutes } from "./routes/checkout.js";
@@ -111,6 +112,7 @@ export function criarAplicacao(): express.Express {
   registerNotificationRoutes(api);
   registerPaymentRoutes(api);
   registerOrderRoutes(api);
+  registerAfterSalesRoutes(api);
   registerSellerRoutes(api);
   registerAdminRoutes(api);
   app.use("/api/v1", api);

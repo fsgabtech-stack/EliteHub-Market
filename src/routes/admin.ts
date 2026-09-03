@@ -40,6 +40,9 @@ const couponSchema = couponFields.superRefine((value, context) => {
 const sellerCouponSchema = couponFields.omit({ scope: true, sellerId: true });
 const sellerListSchema = z.object({ approvalStatus: z.enum(["INCOMPLETE", "PENDING", "APPROVED", "REJECTED"]).optional() });
 const reviewListSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20), status: z.enum(["PENDING", "PUBLISHED", "HIDDEN", "REJECTED"]).default("PENDING") });
+const productListSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20), status: z.enum(["ACTIVE", "ARCHIVED", "DRAFT", "PAUSED"]).optional() });
+const productStatusSchema = z.object({ status: z.enum(["ACTIVE", "ARCHIVED", "PAUSED"]) });
+const auditListSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) });
 
 export function registerAdminRoutes(router: Router): void {
   router.get(
@@ -47,7 +50,7 @@ export function registerAdminRoutes(router: Router): void {
     asyncRoute(async (request, response) => {
       const user = await requireAuthenticatedUser(request);
       requireAnyRole(user, ["ADMIN"]);
-      const [orders, inventory, outbox] = await Promise.all([
+      const [orders, inventory, outbox, afterSales] = await Promise.all([
         query<{ count: number; status: string }>(
           "SELECT status, COUNT(*)::integer AS count FROM orders GROUP BY status ORDER BY status ASC",
         ),
@@ -63,11 +66,20 @@ export function registerAdminRoutes(router: Router): void {
                   COUNT(*) FILTER (WHERE dead_lettered_at IS NOT NULL)::integer AS dead_lettered
              FROM outbox_events`,
         ),
+        query<{ pending: number; refund_pending: number }>(
+          `SELECT COUNT(*) FILTER (WHERE status IN ('PENDING', 'APPROVED', 'RECEIVED'))::integer AS pending,
+                  COUNT(*) FILTER (WHERE status = 'REFUND_PENDING')::integer AS refund_pending
+             FROM after_sales_requests`,
+        ),
       ]);
       response.json({
         inventory: {
           lowStockProducts: inventory.rows[0]?.low_stock_products ?? 0,
           zeroStockProducts: inventory.rows[0]?.zero_stock_products ?? 0,
+        },
+        afterSales: {
+          pending: afterSales.rows[0]?.pending ?? 0,
+          refundPending: afterSales.rows[0]?.refund_pending ?? 0,
         },
         orders: orders.rows.map((entry) => ({ count: entry.count, status: entry.status })),
         outbox: {
@@ -76,6 +88,96 @@ export function registerAdminRoutes(router: Router): void {
           retrying: outbox.rows[0]?.retrying ?? 0,
         },
       });
+    }),
+  );
+
+  router.get(
+    "/admin/products",
+    asyncRoute(async (request, response) => {
+      const parsed = productListSchema.safeParse(request.query);
+      if (!parsed.success) throw invalidRequest();
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["ADMIN", "SUPPORT"]);
+      const values: unknown[] = [];
+      const statusCondition = parsed.data.status
+        ? (values.push(parsed.data.status), `AND products.status = $${values.length}`)
+        : "";
+      values.push(parsed.data.limit);
+      const products = await query<{ id: string; seller_name: string; status: string; title: string; updated_at: Date }>(
+        `SELECT products.id, products.title, products.status, products.updated_at, seller_profiles.store_name AS seller_name
+           FROM products
+           JOIN seller_profiles ON seller_profiles.user_id = products.seller_id
+          WHERE products.deleted_at IS NULL ${statusCondition}
+          ORDER BY products.updated_at DESC
+          LIMIT $${values.length}`,
+        values,
+      );
+      response.json({ items: products.rows.map((product) => ({
+        id: product.id,
+        sellerName: product.seller_name,
+        status: product.status,
+        title: product.title,
+        updatedAt: product.updated_at.toISOString(),
+      })) });
+    }),
+  );
+
+  router.patch(
+    "/admin/products/:id/status",
+    csrfProtection,
+    asyncRoute(async (request, response) => {
+      const productId = z.string().uuid().safeParse(request.params.id);
+      const parsed = productStatusSchema.safeParse(request.body);
+      if (!productId.success || !parsed.success) throw invalidRequest();
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["ADMIN"]);
+      const updated = await transaction(async (client) => {
+        const result = await client.query<{ id: string; seller_id: string; status: string }>(
+          `UPDATE products SET status = $2, updated_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+            RETURNING id, seller_id, status`,
+          [productId.data, parsed.data.status],
+        );
+        const product = result.rows[0];
+        if (!product) throw new AppError(404, "NOT_FOUND");
+        await client.query(
+          `INSERT INTO audit_events(actor_user_id, action, target_type, target_id, metadata)
+           VALUES ($1, 'ADMIN_PRODUCT_STATUS_CHANGED', 'PRODUCT', $2, jsonb_build_object('status', $3::text))`,
+          [user.id, product.id, product.status],
+        );
+        await enqueueDomainEvent(client, {
+          aggregateId: product.id,
+          aggregateType: "PRODUCT",
+          eventType: "ProductUpdated",
+          payload: { productId: product.id, sellerId: product.seller_id, source: "ADMIN_MODERATION" },
+        });
+        return product;
+      });
+      await invalidatePublicCatalogCache();
+      response.json({ id: updated.id, status: updated.status });
+    }),
+  );
+
+  router.get(
+    "/admin/audit-events",
+    asyncRoute(async (request, response) => {
+      const parsed = auditListSchema.safeParse(request.query);
+      if (!parsed.success) throw invalidRequest();
+      const user = await requireAuthenticatedUser(request);
+      requireAnyRole(user, ["ADMIN"]);
+      const events = await query<{ action: string; created_at: Date; target_id: string | null; target_type: string }>(
+        `SELECT action, target_type, target_id, created_at
+           FROM audit_events
+          ORDER BY created_at DESC
+          LIMIT $1`,
+        [parsed.data.limit],
+      );
+      response.json({ items: events.rows.map((event) => ({
+        action: event.action,
+        createdAt: event.created_at.toISOString(),
+        targetId: event.target_id,
+        targetType: event.target_type,
+      })) });
     }),
   );
 
