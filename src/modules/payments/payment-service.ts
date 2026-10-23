@@ -288,6 +288,19 @@ export async function applyVerifiedPayment(input: {
         [value.order_id, value.status],
       );
       await postRefundLedger(client, value.id, value);
+      const closableRequests = await client.query<{ id: string }>(
+        `UPDATE after_sales_requests SET status = 'REFUNDED', updated_at = now()
+          WHERE order_id = $1 AND status = 'REFUND_PENDING'
+          RETURNING id`,
+        [value.order_id],
+      );
+      for (const afterSales of closableRequests.rows) {
+        await client.query(
+          `INSERT INTO after_sales_status_history(after_sales_request_id, from_status, to_status, note)
+           VALUES ($1, 'REFUND_PENDING', 'REFUNDED', 'Reembolso confirmado pelo provedor')`,
+          [afterSales.id],
+        );
+      }
       await enqueueDomainEvent(client, {
         aggregateId: value.order_id,
         aggregateType: "ORDER",

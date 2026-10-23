@@ -168,6 +168,16 @@ export async function transitionOrderStatus(input: {
       if (!input.shipment) {
         throw new AppError(400, "INVALID_REQUEST");
       }
+      const openCancellation = await client.query<{ id: string }>(
+        `SELECT id FROM after_sales_requests
+          WHERE order_id = $1 AND request_type = 'CANCELLATION'
+            AND status IN ('PENDING', 'APPROVED', 'REFUND_PENDING')
+          LIMIT 1`,
+        [order.id],
+      );
+      if (openCancellation.rows[0]) {
+        throw new AppError(409, "CONFLICT");
+      }
       await client.query(
         `UPDATE orders
             SET status = $2, shipping_carrier = $3, tracking_code = $4, shipped_at = now(), updated_at = now()

@@ -5,6 +5,41 @@ import { AppError } from "../../http/errors.js";
 import { transaction, query } from "../../db/pool.js";
 import { enqueueDomainEvent } from "../events/outbox.js";
 
+async function restockAfterSalesOrder(client: PoolClient, input: { actorUserId: string; orderId: string }) {
+  const orderItems = await client.query<{ product_id: string; quantity: number; variant_id: string | null }>(
+    "SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = $1 FOR UPDATE",
+    [input.orderId],
+  );
+  for (const item of orderItems.rows) {
+    const updated = item.variant_id
+      ? await client.query("UPDATE product_variants SET stock_quantity = stock_quantity + $2, updated_at = now() WHERE id = $1", [item.variant_id, item.quantity])
+      : await client.query("UPDATE products SET stock_quantity = stock_quantity + $2, updated_at = now() WHERE id = $1", [item.product_id, item.quantity]);
+    if (updated.rowCount !== 1) throw new AppError(503, "BACKEND_UNAVAILABLE");
+    await client.query(
+      `INSERT INTO inventory_movements(product_id, variant_id, delta, reason, actor_user_id, order_id)
+       VALUES ($1, $2, $3, 'AFTER_SALES_RESTOCK', $4, $5)`,
+      [item.product_id, item.variant_id, item.quantity, input.actorUserId, input.orderId],
+    );
+  }
+  await client.query(
+    "UPDATE inventory_reservations SET status = 'RELEASED', released_at = now() WHERE order_id = $1 AND status = 'CONFIRMED'",
+    [input.orderId],
+  );
+  const redemptions = await client.query<{ coupon_id: string }>(
+    "DELETE FROM coupon_redemptions WHERE order_id = $1 RETURNING coupon_id",
+    [input.orderId],
+  );
+  for (const redemption of redemptions.rows) {
+    await client.query("UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0), updated_at = now() WHERE id = $1", [redemption.coupon_id]);
+  }
+  await enqueueDomainEvent(client, {
+    aggregateId: input.orderId,
+    aggregateType: "ORDER",
+    eventType: "InventoryUpdated",
+    payload: { orderId: input.orderId, reason: "AFTER_SALES_RESTOCK" },
+  });
+}
+
 export const afterSalesStatuses = ["PENDING", "APPROVED", "REJECTED", "RECEIVED", "REFUND_PENDING", "REFUNDED", "CANCELLED"] as const;
 export const afterSalesTypes = ["CANCELLATION", "RETURN"] as const;
 
@@ -191,6 +226,9 @@ export async function transitionAfterSalesRequest(input: { id: string; note?: st
                jsonb_build_object('from', $3::text, 'to', $4::text, 'orderId', $5::text))`,
       [input.user.id, request.id, request.status, input.status, request.order_id],
     );
+    if (input.status === "REFUND_PENDING") {
+      await restockAfterSalesOrder(client, { actorUserId: input.user.id, orderId: request.order_id });
+    }
     await enqueueDomainEvent(client, {
       aggregateId: request.id,
       aggregateType: "AFTER_SALES_REQUEST",

@@ -173,7 +173,7 @@ export async function createCheckout(input: CheckoutInput): Promise<{ replayed: 
     }
     const items = await client.query<CheckoutItemRow>(
       `SELECT cart_items.product_id, cart_items.variant_id, cart_items.quantity,
-              products.seller_id, products.title, products.price_cents AS unit_price_cents,
+              products.seller_id, products.title, COALESCE(product_variants.price_cents, products.price_cents) AS unit_price_cents,
               products.stock_quantity AS product_stock,
               product_variants.stock_quantity AS variant_stock,
               seller_profiles.approval_status AS seller_approval_status
